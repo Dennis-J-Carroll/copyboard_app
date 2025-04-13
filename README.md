@@ -6,7 +6,7 @@ Here I wanted to create a way that, instead of having one selection pastable fro
 
 This is CopyBoard: 
 <p align="center">
-  <img src="image.png" alt="CopyBoard App Preview" width="600"/>
+  <img src="universal_upscale_0_5c1108bf-7f62-4c4e-bc97-268262d24997_0.jpg" alt="CopyBoard App Preview" width="600"/>
 </p>
 
 
