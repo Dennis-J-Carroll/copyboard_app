@@ -1,11 +1,14 @@
-# Copyboard
+# CopyBoard
 
 A multi-clipboard utility for copying and pasting multiple items across all major platforms.
 As you use you computer for anything, wether it be typical research, or just casually. Have you ever found yourself having to switch between pages or tabs to get all of the segments of information you wanted in one place? 
 Here I wanted to create a way that, instead of having one selection pastable from a copied item, the user will have the cchoice of ten items that they have copied. 
 
 This is CopyBoard: 
-![Alt text](/universal_upscale_0_2e8e9002-374d-42bb-99c7-bfb1482b270f_0.jpguniversal_upscale_0_2e8e9002-374d-42bb-99c7-bfb1482b270f_0.jpg)
+<p align="center">
+  <img src="image.png" alt="CopyBoard App Preview" width="600"/>
+</p>
+
 
 
 
