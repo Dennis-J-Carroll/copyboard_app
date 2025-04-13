@@ -5,7 +5,7 @@ As you use you computer for anything, wether it be typical research, or just cas
 Here I wanted to create a way that, instead of having one selection pastable from a copied item, the user will have the cchoice of ten items that they have copied. 
 
 This is CopyBoard: 
-![Alt text](universal_upscale_0_2e8e9002-374d-42bb-99c7-bfb1482b270f_0.jpguniversal_upscale_0_2e8e9002-374d-42bb-99c7-bfb1482b270f_0.jpg)
+![Alt text](/universal_upscale_0_2e8e9002-374d-42bb-99c7-bfb1482b270f_0.jpguniversal_upscale_0_2e8e9002-374d-42bb-99c7-bfb1482b270f_0.jpg)
 
 
 
