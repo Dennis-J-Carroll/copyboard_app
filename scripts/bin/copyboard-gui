@@ -1,0 +1,4 @@
+#!/bin/bash
+# Copyboard GUI launcher
+
+python3 /home/dennisjcarroll/CascadeProjects/windsurf-project/copyboard_extension/scripts/copyboard_gui.py

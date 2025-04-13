@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=Copyboard Hotkeys
+Comment=Enable global hotkeys for Copyboard
+Exec=python3 /home/dennisjcarroll/CascadeProjects/windsurf-project/copyboard_extension/global_hotkeys.py
+Terminal=false
+Type=Application
+Icon=edit-paste
+Categories=Utility;
+X-GNOME-Autostart-enabled=true

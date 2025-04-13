@@ -1,0 +1,4 @@
+#!/bin/bash
+# Copyboard CLI launcher
+
+python3 -m copyboard_extension.cli "$@"

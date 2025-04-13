@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "Simple Native Messaging Test",
+  "version": "1.0",
+  "description": "Simple extension to test native messaging",
+  "permissions": ["nativeMessaging"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html"
+  }
+}

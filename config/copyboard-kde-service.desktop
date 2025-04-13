@@ -1,0 +1,16 @@
+[Desktop Entry]
+Type=Service
+X-KDE-ServiceTypes=KonqPopupMenu/Plugin
+MimeType=all/all;
+Actions=CopyToBoard;CopyboardGUI;
+X-KDE-AuthorizeAction=shell_access
+
+[Desktop Action CopyToBoard]
+Name=Copy to Clipboard Board
+Exec=sh -c 'pyperclip copy %u && python3 -c "from copyboard_extension import core; core.copy_to_board(); print(\"Added to clipboard board\")"'
+Icon=edit-copy
+
+[Desktop Action CopyboardGUI]
+Name=Open Copyboard
+Exec=copyboard-gui
+Icon=edit-paste

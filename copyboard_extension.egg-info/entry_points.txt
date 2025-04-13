@@ -1,0 +1,7 @@
+[console_scripts]
+copyboard = copyboard_extension.cli:main
+copyboard-install-integration = copyboard_extension.system_integration:install_context_menu_integration
+
+[gui_scripts]
+copyboard-gui = copyboard_extension.gui:run_gui
+

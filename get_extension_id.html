@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Chrome Extension ID Finder</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        code {
+            background-color: #f5f5f5;
+            padding: 2px 4px;
+            border-radius: 4px;
+            font-family: monospace;
+        }
+        pre {
+            background-color: #f5f5f5;
+            padding: 10px;
+            border-radius: 4px;
+            overflow-x: auto;
+        }
+        .important {
+            background-color: #ffeeba;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>Chrome Extension ID Finder</h1>
+    
+    <div class="important">
+        <h2>Your extension ID is:</h2>
+        <pre id="extensionId">Loading...</pre>
+    </div>
+    
+    <h2>Instructions</h2>
+    <ol>
+        <li>Open Chrome and go to <code>chrome://extensions</code></li>
+        <li>Make sure "Developer mode" is turned on (toggle in top-right)</li>
+        <li>Find your Copyboard extension</li>
+        <li>The ID shown here should match the ID displayed under the extension name</li>
+        <li>If they don't match, update your manifest file with the correct ID</li>
+    </ol>
+    
+    <h2>Debugging steps:</h2>
+    <ol>
+        <li>Update your manifest file at <code>~/.config/google-chrome/NativeMessagingHosts/com.copyboard.extension.json</code></li>
+        <li>Replace the extension ID in the <code>allowed_origins</code> field with the correct ID</li>
+        <li>Restart Chrome completely (close all windows and reopen)</li>
+        <li>Reload the extension</li>
+    </ol>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // Display extension ID if this page is opened within the extension
+            if (chrome && chrome.runtime && chrome.runtime.id) {
+                document.getElementById('extensionId').textContent = chrome.runtime.id;
+            } else {
+                document.getElementById('extensionId').textContent = 
+                    "Not available - open this page from your extension";
+            }
+        });
+    </script>
+</body>
+</html>

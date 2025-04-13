@@ -1,0 +1,40 @@
+#!/usr/bin/env python3
+"""
+Install system integration for Copyboard
+"""
+import sys
+import os
+from copyboard_extension.system_integration import (
+    install_context_menu_integration,
+    get_desktop_environment
+)
+
+def main():
+    """Main entry point"""
+    print("Copyboard System Integration Installer")
+    print("=====================================")
+    print(f"Detected desktop environment: {get_desktop_environment()}")
+    print("This will install Copyboard integration with your system's context menu.")
+    print("You'll be able to access Copyboard directly from the right-click menu.")
+    
+    try:
+        result = install_context_menu_integration()
+        
+        if result['success']:
+            print("\nSuccess! 🎉")
+            print(result['message'])
+        else:
+            print("\nInstallation failed ❌")
+            print(result['message'])
+            print("\nAlternative: You can still use Copyboard through the command line")
+            print("or by running 'copyboard-gui'.")
+            return 1
+    
+    except Exception as e:
+        print(f"\nAn error occurred: {str(e)}")
+        return 1
+    
+    return 0
+
+if __name__ == '__main__':
+    sys.exit(main())

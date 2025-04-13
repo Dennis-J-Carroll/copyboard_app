@@ -1,0 +1,9 @@
+#!python
+"""
+Copyboard CLI entry point
+"""
+import sys
+from copyboard_extension.cli import main
+
+if __name__ == '__main__':
+    sys.exit(main())
