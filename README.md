@@ -6,7 +6,7 @@ Here I wanted to create a way that, instead of having one selection pastable fro
 
 This is CopyBoard: 
 
-file:///home/dennisjcarroll/Downloads/universal_upscale_0_5c1108bf-7f62-4c4e-bc97-268262d24997_0.jpg
+
 
 
 
