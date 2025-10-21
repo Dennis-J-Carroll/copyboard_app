@@ -9,7 +9,6 @@ import json
 import time
 from typing import List, Optional, Dict, Union, Tuple
 from . import paste_helper
-from copyboard_extension.rapid_clipboard import copy, paste, copy_paste
 
 # Maximum items to store in the clipboard history
 MAX_BOARD_SIZE = 10
