@@ -1,0 +1,33 @@
+name: copyboard_mobile
+description: Mobile multi-clipboard with hold-and-drag selection
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # UI
+  cupertino_icons: ^1.0.6
+
+  # Clipboard
+  clipboard: ^0.1.3
+
+  # Storage
+  shared_preferences: ^2.2.2
+
+  # Haptics
+  vibration: ^1.8.4
+
+  # State management
+  provider: ^6.1.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.1
+
+flutter:
+  uses-material-design: true
