@@ -10,7 +10,6 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
 lib64/
 parts/
 sdist/
@@ -19,6 +18,10 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+
+# Python lib directories (but not Flutter lib/)
+/lib/
+*/lib/*.py[cod]
 
 # Virtual environments
 venv/
