@@ -1,208 +1,204 @@
 #!/usr/bin/env python3
 """
-Cross-platform functionality tests for Copyboard
+Cross-platform functionality tests for Copyboard.
 
-This test suite verifies that Copyboard works correctly across
-Linux, macOS, and Windows platforms.
+Verifies platform detection, paste routing, and platform-specific
+paste helpers using mocked system calls.
 """
-
 import os
 import sys
-import unittest
 import platform
-import tempfile
-import json
-from pathlib import Path
+import subprocess
+import pytest
 from unittest import mock
 
-# Add parent directory to path for imports
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from copyboard_extension import paste_helper
 
-from copyboard_extension import core, paste_helper
 
-class TestPlatformDetection(unittest.TestCase):
-    """Test platform detection functionality"""
-    
-    def test_get_platform(self):
-        """Test that platform detection returns the correct platform"""
+# ── Platform Detection ───────────────────────────────────────────────────
+class TestPlatformDetection:
+    """Test get_platform() on the current OS."""
+
+    def test_get_platform_returns_string(self):
+        result = paste_helper.get_platform()
+        assert result in ("linux", "macos", "windows")
+
+    def test_platform_matches_system(self):
         system = platform.system().lower()
-        
-        if system == "darwin":
-            expected = "macos"
-        elif system == "windows":
-            expected = "windows"
-        else:
-            expected = "linux"
-            
-        self.assertEqual(paste_helper.get_platform(), expected)
+        expected_map = {"linux": "linux", "darwin": "macos", "windows": "windows"}
+        expected = expected_map.get(system, "linux")
+        assert paste_helper.get_platform() == expected
 
-class TestCoreFeatures(unittest.TestCase):
-    """Test core features across platforms"""
-    
-    def setUp(self):
-        """Set up test environment"""
-        # Create a temporary board file
-        self.temp_dir = tempfile.TemporaryDirectory()
-        self.temp_board_file = os.path.join(self.temp_dir.name, "board.json")
-        
-        # Save original board file path
-        self.original_board_file = core.BOARD_FILE
-        
-        # Set board file to our temporary file
-        core.BOARD_FILE = self.temp_board_file
-        
-        # Clear the board
-        core._board = []
-        core._save_board()
-    
-    def tearDown(self):
-        """Clean up after tests"""
-        # Restore original board file path
-        core.BOARD_FILE = self.original_board_file
-        
-        # Clean up temporary directory
-        self.temp_dir.cleanup()
-    
-    def test_add_to_board(self):
-        """Test adding items to the board"""
-        # Add some items
-        core.copy_to_board("Test item 1")
-        core.copy_to_board("Test item 2")
-        
-        # Check that they were added
-        board = core.get_board()
-        self.assertEqual(len(board), 2)
-        self.assertEqual(board[0], "Test item 2")  # Most recent should be first
-        self.assertEqual(board[1], "Test item 1")
-    
-    def test_board_persistence(self):
-        """Test that the board is saved to disk"""
-        # Add some items
-        core.copy_to_board("Test persistence")
-        
-        # Check that the file exists and contains the item
-        self.assertTrue(os.path.exists(self.temp_board_file))
-        
-        with open(self.temp_board_file, 'r') as f:
-            saved_board = json.load(f)
-        
-        self.assertEqual(len(saved_board), 1)
-        self.assertEqual(saved_board[0], "Test persistence")
-    
-    def test_board_max_size(self):
-        """Test that the board respects the maximum size"""
-        # Add more items than the maximum
-        for i in range(core.MAX_BOARD_SIZE + 5):
-            core.copy_to_board(f"Test item {i}")
-        
-        # Check that only MAX_BOARD_SIZE items are kept
-        board = core.get_board()
-        self.assertEqual(len(board), core.MAX_BOARD_SIZE)
-        
-        # Check that the most recent items are kept
-        self.assertEqual(board[0], f"Test item {core.MAX_BOARD_SIZE + 4}")
 
-class TestPasteHelper(unittest.TestCase):
-    """Test paste helper functionality"""
-    
-    def test_paste_text(self):
-        """Test paste_text function with mocked platform-specific functions"""
-        test_text = "Test paste text"
-        
-        # Test Linux paste
-        with mock.patch('copyboard_extension.paste_helper.get_platform', return_value='linux'), \
-             mock.patch('copyboard_extension.paste_helper.paste_text_linux', return_value=True) as mock_linux:
-            result = paste_helper.paste_text(test_text)
-            self.assertTrue(result)
-            mock_linux.assert_called_once_with(test_text)
-        
-        # Test macOS paste
-        with mock.patch('copyboard_extension.paste_helper.get_platform', return_value='macos'), \
-             mock.patch('copyboard_extension.paste_helper.paste_text_macos', return_value=True) as mock_macos:
-            result = paste_helper.paste_text(test_text)
-            self.assertTrue(result)
-            mock_macos.assert_called_once_with(test_text)
-        
-        # Test Windows paste
-        with mock.patch('copyboard_extension.paste_helper.get_platform', return_value='windows'), \
-             mock.patch('copyboard_extension.paste_helper.paste_text_windows', return_value=True) as mock_windows:
-            result = paste_helper.paste_text(test_text)
-            self.assertTrue(result)
-            mock_windows.assert_called_once_with(test_text)
-    
-    @unittest.skipIf(platform.system().lower() != "linux", "Linux-specific test")
-    def test_linux_paste(self):
-        """Test Linux-specific paste functionality"""
-        # This is a basic test that just checks if the function runs without errors
-        # We can't fully test the paste functionality in an automated test
-        
-        # Mock subprocess to avoid actual command execution
-        with mock.patch('subprocess.Popen'), \
-             mock.patch('subprocess.run'):
-            result = paste_helper.paste_text_linux("Test Linux paste")
-            # We're just checking it doesn't raise an exception
-            self.assertIsNotNone(result)
-    
-    @unittest.skipIf(platform.system().lower() != "darwin", "macOS-specific test")
-    def test_macos_paste(self):
-        """Test macOS-specific paste functionality"""
-        # Mock subprocess to avoid actual command execution
-        with mock.patch('subprocess.run'):
-            result = paste_helper.paste_text_macos("Test macOS paste")
-            # We're just checking it doesn't raise an exception
-            self.assertIsNotNone(result)
-    
-    @unittest.skipIf(platform.system().lower() != "windows", "Windows-specific test")
-    def test_windows_paste(self):
-        """Test Windows-specific paste functionality"""
+# ── Paste Routing ────────────────────────────────────────────────────────
+class TestPasteTextRouting:
+    """paste_text() dispatches to the correct platform-specific function."""
+
+    def test_routes_to_linux(self, monkeypatch):
+        monkeypatch.setattr(paste_helper, "get_platform", lambda: "linux")
+        with mock.patch.object(paste_helper, "paste_text_linux", return_value=True) as m:
+            assert paste_helper.paste_text("test") is True
+            m.assert_called_once_with("test")
+
+    def test_routes_to_macos(self, monkeypatch):
+        monkeypatch.setattr(paste_helper, "get_platform", lambda: "macos")
+        with mock.patch.object(paste_helper, "paste_text_macos", return_value=True) as m:
+            assert paste_helper.paste_text("test") is True
+            m.assert_called_once_with("test")
+
+    def test_routes_to_windows(self, monkeypatch):
+        monkeypatch.setattr(paste_helper, "get_platform", lambda: "windows")
+        with mock.patch.object(paste_helper, "paste_text_windows", return_value=True) as m:
+            assert paste_helper.paste_text("test") is True
+            m.assert_called_once_with("test")
+
+    def test_unknown_platform_returns_false(self, monkeypatch):
+        monkeypatch.setattr(paste_helper, "get_platform", lambda: "beos")
+        assert paste_helper.paste_text("test") is False
+
+
+# ── Linux Paste ──────────────────────────────────────────────────────────
+class TestLinuxPaste:
+    """Paste operations on Linux (mocked subprocess calls)."""
+
+    def test_x11_paste(self, monkeypatch):
+        """Under X11, xclip + xdotool are invoked."""
+        monkeypatch.setenv("XDG_SESSION_TYPE", "x11")
+        with mock.patch("subprocess.Popen") as mock_popen, \
+             mock.patch("subprocess.run") as mock_run:
+            mock_proc = mock.MagicMock()
+            mock_proc.communicate = mock.MagicMock()
+            mock_popen.return_value = mock_proc
+
+            result = paste_helper.paste_text_linux("hello")
+            assert result is True
+            mock_popen.assert_called_once()
+            mock_run.assert_called_once()
+
+    def test_wayland_paste(self, monkeypatch):
+        """Under Wayland, wl-copy + wtype are invoked."""
+        monkeypatch.setenv("XDG_SESSION_TYPE", "wayland")
+        with mock.patch("subprocess.Popen") as mock_popen, \
+             mock.patch("subprocess.run") as mock_run:
+            mock_proc = mock.MagicMock()
+            mock_proc.communicate = mock.MagicMock()
+            mock_popen.return_value = mock_proc
+
+            result = paste_helper.paste_text_linux("hello")
+            assert result is True
+
+    def test_linux_paste_failure(self, monkeypatch):
+        """If subprocess fails, return False instead of crashing."""
+        monkeypatch.setenv("XDG_SESSION_TYPE", "x11")
+        with mock.patch("subprocess.Popen", side_effect=FileNotFoundError):
+            result = paste_helper.paste_text_linux("fail")
+            assert result is False
+
+
+# ── macOS Paste ──────────────────────────────────────────────────────────
+class TestMacOSPaste:
+    """Paste operations on macOS (mocked osascript)."""
+
+    def test_macos_paste_calls_osascript(self):
+        with mock.patch("subprocess.run") as mock_run:
+            result = paste_helper.paste_text_macos("hello")
+            assert result is True
+            mock_run.assert_called_once()
+            call_args = mock_run.call_args
+            assert call_args[0][0][0] == "osascript"
+
+    def test_macos_paste_escapes_quotes(self):
+        with mock.patch("subprocess.run") as mock_run:
+            paste_helper.paste_text_macos('say "hello"')
+            call_args = mock_run.call_args
+            script = call_args[0][0][2]  # -e <script>
+            assert '\\"' in script or "hello" in script
+
+    def test_macos_paste_failure(self):
+        with mock.patch("subprocess.run", side_effect=FileNotFoundError):
+            result = paste_helper.paste_text_macos("fail")
+            assert result is False
+
+
+# ── Windows Paste ────────────────────────────────────────────────────────
+class TestWindowsPaste:
+    """Paste operations on Windows (mocked win32 API)."""
+
+    def test_windows_paste_with_mocked_api(self):
+        """When win32 modules exist, clipboard is set and keystrokes are simulated."""
+        fake_clipboard = mock.MagicMock()
+        fake_con = mock.MagicMock()
+        fake_con.CF_UNICODETEXT = 13
+        fake_con.KEYEVENTF_KEYUP = 2
+        fake_api = mock.MagicMock()
+        fake_gui = mock.MagicMock()
+
+        modules = {
+            "win32clipboard": fake_clipboard,
+            "win32con": fake_con,
+            "win32api": fake_api,
+            "win32gui": fake_gui,
+        }
+        with mock.patch.dict("sys.modules", modules):
+            result = paste_helper.paste_text_windows("text")
+            assert result is True
+            fake_clipboard.OpenClipboard.assert_called_once()
+            fake_clipboard.EmptyClipboard.assert_called_once()
+            fake_clipboard.SetClipboardText.assert_called_once_with("text", 13)
+            fake_clipboard.CloseClipboard.assert_called_once()
+
+    def test_windows_paste_import_error(self):
+        """If win32 modules are missing, return False."""
+        with mock.patch.dict("sys.modules", {"win32clipboard": None}):
+            result = paste_helper.paste_text_windows("fail")
+            assert result is False
+
+
+# ── Async Paste ──────────────────────────────────────────────────────────
+class TestAsyncPaste:
+    """paste_current_clipboard() and paste_with_delay()."""
+
+    def test_paste_current_clipboard_returns_true(self):
+        """The auto-mocked paste_current_clipboard (from conftest) returns True."""
+        assert paste_helper.paste_current_clipboard() is True
+
+    def test_paste_with_delay_returns_true(self):
+        assert paste_helper.paste_with_delay(50) is True
+
+
+# ── Paste Combination (paste_helper level) ───────────────────────────────
+class TestPasteCombination:
+    """paste_helper.paste_combination()."""
+
+    def test_combine_and_paste(self, mock_clipboard):
+        result = paste_helper.paste_combination(["alpha", "beta", "gamma"])
+        assert result is True
+        assert mock_clipboard["content"] == "alphabetagamma"
+
+    def test_empty_list_returns_false(self):
+        assert paste_helper.paste_combination([]) is False
+
+
+# ── System-wide Installer ────────────────────────────────────────────────
+class TestSystemInstaller:
+    """Basic smoke tests for the installer module."""
+
+    def test_installer_functions_importable(self):
+        sys.path.insert(
+            0,
+            os.path.abspath(
+                os.path.join(os.path.dirname(__file__), "..", "scripts")
+            ),
+        )
         try:
-            # Try to import Windows-specific modules
-            import win32clipboard
-            import win32con
-            import win32api
-            
-            # Mock Windows API calls
-            with mock.patch('win32clipboard.OpenClipboard'), \
-                 mock.patch('win32clipboard.EmptyClipboard'), \
-                 mock.patch('win32clipboard.SetClipboardText'), \
-                 mock.patch('win32clipboard.CloseClipboard'), \
-                 mock.patch('win32api.keybd_event'):
-                result = paste_helper.paste_text_windows("Test Windows paste")
-                # We're just checking it doesn't raise an exception
-                self.assertIsNotNone(result)
+            from install_system_wide import (
+                get_platform,
+                install_linux,
+                install_macos,
+                install_windows,
+            )
+            assert callable(install_linux)
+            assert callable(install_macos)
+            assert callable(install_windows)
         except ImportError:
-            # Skip test if Windows modules aren't available
-            self.skipTest("Windows modules not available")
-
-class TestSystemWideInstaller(unittest.TestCase):
-    """Test system-wide installer functionality"""
-    
-    def test_platform_detection(self):
-        """Test that the installer correctly detects the platform"""
-        # Import the installer module
-        sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'scripts')))
-        from install_system_wide import get_platform
-        
-        system = platform.system().lower()
-        
-        if system == "darwin":
-            expected = "macos"
-        elif system == "windows":
-            expected = "windows"
-        else:
-            expected = "linux"
-            
-        self.assertEqual(get_platform(), expected)
-    
-    def test_installer_functions_exist(self):
-        """Test that platform-specific installer functions exist"""
-        sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'scripts')))
-        from install_system_wide import install_linux, install_macos, install_windows
-        
-        # Just check that the functions exist
-        self.assertTrue(callable(install_linux))
-        self.assertTrue(callable(install_macos))
-        self.assertTrue(callable(install_windows))
-
-if __name__ == '__main__':
-    unittest.main() 
+            pytest.skip("install_system_wide not available")

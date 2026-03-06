@@ -27,6 +27,13 @@ wheels/
 venv/
 ENV/
 env/
+.venv/
+
+# Testing
+.coverage
+.pytest_cache/
+htmlcov/
+coverage.xml
 
 # IDE
 .vscode/

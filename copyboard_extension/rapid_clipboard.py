@@ -8,8 +8,7 @@ from typing import List, Optional, Dict
 from . import core
 from . import hotkeys
 from . import paste_helper
-
-# Initialize hotkeys if available
+# Initialize hotkeys from ConfigManager
 try:
     hotkeys.setup_default_hotkeys(core)
     HOTKEYS_ENABLED = True

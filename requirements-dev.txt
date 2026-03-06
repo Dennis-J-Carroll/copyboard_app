@@ -1,0 +1,12 @@
+# Core runtime dependencies
+pyperclip>=1.8.0
+pillow>=8.0.0
+
+# Testing dependencies
+pytest>=7.0
+pytest-cov>=4.0
+pytest-timeout>=2.0
+pytest-mock>=3.0
+
+# Optional: keyboard library (requires root on Linux)
+# keyboard>=0.13.5

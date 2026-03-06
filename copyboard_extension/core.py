@@ -9,9 +9,10 @@ import json
 import time
 from typing import List, Optional, Dict, Union, Tuple
 from . import paste_helper
+from .config_manager import config
 
-# Maximum items to store in the clipboard history
-MAX_BOARD_SIZE = 10
+# Maximum items to store in the clipboard history (read from config)
+MAX_BOARD_SIZE = config.get("board", "max_items", 10)
 
 # File to store the clipboard board
 USER_HOME = os.path.expanduser("~")

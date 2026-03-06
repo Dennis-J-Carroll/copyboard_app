@@ -14,173 +14,199 @@ import platform
 import argparse
 import subprocess
 from pathlib import Path
+from typing import Optional
 
-def get_chrome_dir() -> str:
+# --- Configuration ---
+# Choose ONE consistent Firefox ID
+FIREFOX_EXTENSION_ID = "copyboard@yourdomain.com" # Replace with your actual ID
+
+# Default Native Host script install location (for system packages)
+# This is an *example* path used during packaging. The final package
+# determines the actual install location.
+DEFAULT_HOST_INSTALL_PATH = "/usr/lib/copyboard_extension/native_messaging_host.py"
+
+# Native Messaging Host Name
+NATIVE_HOST_NAME = "com.copyboard.extension"
+# --- End Configuration ---
+
+def get_dev_chrome_dir() -> str:
     """
-    Get the directory for Chrome/Chromium native messaging hosts.
-    
+    Get the directory for Chrome/Chromium native messaging hosts *for development*.
+    NOTE: System-wide installs for packages use different paths.
+
     Returns:
-        Path to Chrome's native messaging hosts directory
+        Path to user's Chrome native messaging hosts directory
     """
     system = platform.system()
-    
-    if system == "Linux":
-        # For Chrome/Chromium
-        chrome_dir = os.path.expanduser("~/.config/google-chrome/NativeMessagingHosts")
-        chromium_dir = os.path.expanduser("~/.config/chromium/NativeMessagingHosts")
-        
-        # Try Chrome first, then Chromium
-        for d in [chrome_dir, chromium_dir]:
-            if not os.path.exists(d):
-                os.makedirs(d, exist_ok=True)
-            return d
-    
-    elif system == "Darwin":  # macOS
-        # For Chrome/Chromium
-        chrome_dir = os.path.expanduser(
-            "~/Library/Application Support/Google/Chrome/NativeMessagingHosts"
-        )
-        if not os.path.exists(chrome_dir):
-            os.makedirs(chrome_dir, exist_ok=True)
-        return chrome_dir
-    
-    elif system == "Windows":
-        # For Chrome (registry-based on Windows, but we need dir for the json)
-        chrome_dir = os.path.expanduser(
-            "~\\AppData\\Local\\Google\\Chrome\\User Data\\NativeMessagingHosts"
-        )
-        if not os.path.exists(chrome_dir):
-            os.makedirs(chrome_dir, exist_ok=True)
-        return chrome_dir
-    
-    print(f"Unsupported platform: {system}")
-    sys.exit(1)
+    paths_to_check = []
 
-def get_firefox_dir() -> str:
-    """
-    Get the directory for Firefox native messaging hosts.
-    
-    Returns:
-        Path to Firefox's native messaging hosts directory
-    """
-    system = platform.system()
-    
     if system == "Linux":
-        # For Firefox
-        firefox_dir = os.path.expanduser("~/.mozilla/native-messaging-hosts")
-        if not os.path.exists(firefox_dir):
-            os.makedirs(firefox_dir, exist_ok=True)
-        return firefox_dir
-    
-    elif system == "Darwin":  # macOS
-        # For Firefox
-        firefox_dir = os.path.expanduser(
-            "~/Library/Application Support/Mozilla/NativeMessagingHosts"
-        )
-        if not os.path.exists(firefox_dir):
-            os.makedirs(firefox_dir, exist_ok=True)
-        return firefox_dir
-    
-    elif system == "Windows":
-        # For Firefox
-        firefox_dir = os.path.expanduser(
-            "~\\AppData\\Roaming\\Mozilla\\NativeMessagingHosts"
-        )
-        if not os.path.exists(firefox_dir):
-            os.makedirs(firefox_dir, exist_ok=True)
-        return firefox_dir
-    
-    print(f"Unsupported platform: {system}")
-    sys.exit(1)
-
-def create_manifest(host_path: str) -> dict:
-    """
-    Create the native messaging host manifest.
-    
-    Args:
-        host_path: Path to the native messaging host script
-        
-    Returns:
-        Dict containing the manifest data
-    """
-    # Chrome extension ID for the Copyboard extension
-    # This is derived from the key in the manifest.json file
-    extension_id = "ckhambjmhhinampfpogbjkflkgimdjio"
-    
-    return {
-        "name": "com.copyboard.extension",
-        "description": "Copyboard Native Messaging Host",
-        "path": host_path,
-        "type": "stdio",
-        "allowed_origins": [
-            f"chrome-extension://{extension_id}/",
-            "chrome://extensions/"
+        paths_to_check = [
+            "~/.config/google-chrome/NativeMessagingHosts",
+            "~/.config/chromium/NativeMessagingHosts",
         ]
+    elif system == "Darwin":  # macOS
+        paths_to_check = [
+            "~/Library/Application Support/Google/Chrome/NativeMessagingHosts",
+            "~/Library/Application Support/Chromium/NativeMessagingHosts",
+        ]
+    elif system == "Windows":
+        paths_to_check = [
+            "~\\AppData\\Local\\Google\\Chrome\\User Data\\NativeMessagingHosts"
+        ] # Others like Edge might be relevant too
+
+    for p in paths_to_check:
+        d = os.path.expanduser(p)
+        # Return the first one found or the default Chrome one if none exist yet
+        if os.path.exists(os.path.dirname(d)):
+             os.makedirs(d, exist_ok=True)
+             return d
+    
+    # Fallback if no standard browser config path found yet
+    fallback_dir = os.path.expanduser(paths_to_check[0])
+    os.makedirs(fallback_dir, exist_ok=True)
+    return fallback_dir
+
+def get_dev_firefox_dir() -> str:
+    """
+    Get the directory for Firefox native messaging hosts *for development*.
+    NOTE: System-wide installs for packages use different paths.
+
+    Returns:
+        Path to user's Firefox native messaging hosts directory
+    """
+    system = platform.system()
+    path = ""
+
+    if system == "Linux":
+        path = "~/.mozilla/native-messaging-hosts"
+    elif system == "Darwin":  # macOS
+        path = "~/Library/Application Support/Mozilla/NativeMessagingHosts"
+    elif system == "Windows":
+        path = "~\\AppData\\Roaming\\Mozilla\\NativeMessagingHosts"
+    else:
+         print(f"Unsupported platform for Firefox dev dir: {system}")
+         sys.exit(1)
+
+    firefox_dir = os.path.expanduser(path)
+    os.makedirs(firefox_dir, exist_ok=True)
+    return firefox_dir
+
+def generate_manifest_data(host_executable_path: str, chrome_extension_id: Optional[str] = None) -> dict:
+    """
+    Generate the native messaging host manifest data structure.
+
+    Args:
+        host_executable_path: Absolute path to the native host script.
+        chrome_extension_id: The Chrome extension ID (required for Chrome manifest).
+
+    Returns:
+        Dict containing the base manifest data.
+    """
+    manifest = {
+        "name": NATIVE_HOST_NAME,
+        "description": "Copyboard Native Messaging Host",
+        "path": host_executable_path,
+        "type": "stdio",
     }
+    # Chrome/Chromium specific part
+    if chrome_extension_id:
+         manifest["allowed_origins"] = [
+            f"chrome-extension://{chrome_extension_id}/",
+         ]
+    # Firefox specific part (will be added later if needed)
+    else:
+        manifest["allowed_extensions"] = [FIREFOX_EXTENSION_ID]
+
+    return manifest
 
 def main() -> None:
     """
-    Main installation function.
+    Main installation function (primarily for development setup).
     """
     parser = argparse.ArgumentParser(
-        description="Install Copyboard browser extension native messaging host"
+        description="Install Copyboard browser extension native messaging host (for development)"
     )
     parser.add_argument(
         "--browser", choices=["chrome", "firefox", "all"], default="all",
         help="Browser to install for (default: all)"
     )
-    args = parser.parse_args()
-    
-    # Get the script directory
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    
-    # Go up one directory level to get the project root
-    project_root = os.path.dirname(script_dir)
-    
-    # Path to the native messaging host script
-    host_script = os.path.join(
-        project_root, "copyboard_extension", "native_messaging_host.py"
+    parser.add_argument(
+        "--chrome-id", default="ckhambjmhhinampfpogbjkflkgimdjio", # Replace if you use a fixed key
+        help="Your Chrome Extension ID (obtain after first upload or from key)"
     )
-    
-    # Make sure the script is executable
-    os.chmod(host_script, os.stat(host_script).st_mode | stat.S_IEXEC)
-    
-    # Create the native messaging host manifest
-    manifest = create_manifest(host_script)
-    
+    parser.add_argument(
+        "--host-path", default=None,
+        help="Explicit path to the native_messaging_host.py script (optional)"
+    )
+    args = parser.parse_args()
+
+    # --- Determine Host Script Path ---
+    if args.host_path:
+        host_script_abs_path = os.path.abspath(args.host_path)
+    else:
+        # Assume script is run from the 'scripts' directory
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        project_root = os.path.dirname(script_dir)
+        host_script_rel_path = os.path.join(
+            project_root, "copyboard_extension", "native_messaging_host.py"
+        )
+        host_script_abs_path = os.path.abspath(host_script_rel_path)
+
+    if not os.path.exists(host_script_abs_path):
+        print(f"Error: Native host script not found at {host_script_abs_path}")
+        sys.exit(1)
+
+    print(f"Using native host script: {host_script_abs_path}")
+
+    # Make sure the script is executable (important for Linux/macOS)
+    try:
+        current_mode = os.stat(host_script_abs_path).st_mode
+        os.chmod(host_script_abs_path, current_mode | stat.S_IEXEC)
+        print(f"Made host script executable.")
+    except OSError as e:
+        print(f"Warning: Could not set executable flag: {e}")
+
+
+    # --- Install Manifests (Development Locations) ---
+    manifest_filename = f"{NATIVE_HOST_NAME}.json"
+
     # Install for Chrome/Chromium
     if args.browser in ["chrome", "all"]:
-        chrome_dir = get_chrome_dir()
-        manifest_path = os.path.join(chrome_dir, "com.copyboard.extension.json")
+        if not args.chrome_id:
+            print("Error: --chrome-id is required when installing for Chrome.")
+            sys.exit(1)
         
-        # Make sure Chrome manifest has allowed_origins
-        chrome_manifest = manifest.copy()
-        
-        with open(manifest_path, "w") as f:
-            json.dump(chrome_manifest, f, indent=2)
-        
-        print(f"Installed Chrome/Chromium native messaging host to {manifest_path}")
-    
+        chrome_dev_dir = get_dev_chrome_dir()
+        manifest_path = os.path.join(chrome_dev_dir, manifest_filename)
+        chrome_manifest_data = generate_manifest_data(host_script_abs_path, chrome_extension_id=args.chrome_id)
+
+        try:
+            with open(manifest_path, "w") as f:
+                json.dump(chrome_manifest_data, f, indent=2)
+            print(f"Installed Chrome/Chromium dev manifest to {manifest_path}")
+        except IOError as e:
+            print(f"Error writing Chrome manifest: {e}")
+
+
     # Install for Firefox
     if args.browser in ["firefox", "all"]:
-        firefox_dir = get_firefox_dir()
-        manifest_path = os.path.join(firefox_dir, "com.copyboard.extension.json")
-        
-        # Firefox uses a different manifest format
-        firefox_manifest = manifest.copy()
-        firefox_manifest["allowed_extensions"] = ["copyboard@example.com", "{27bd49e5-7ad9-4847-9c3a-b5d0a5a6c177}"]
-        if "allowed_origins" in firefox_manifest:
-            del firefox_manifest["allowed_origins"]
-        
-        with open(manifest_path, "w") as f:
-            json.dump(firefox_manifest, f, indent=2)
-        
-        print(f"Installed Firefox native messaging host to {manifest_path}")
-    
-    print("\nInstallation complete!")
-    print("\nNext steps:")
-    print("1. Install the browser extension from the browser_extension directory")
-    print("2. Test the extension by right-clicking on a webpage")
+        firefox_dev_dir = get_dev_firefox_dir()
+        manifest_path = os.path.join(firefox_dev_dir, manifest_filename)
+        # Generate manifest *without* Chrome ID to get the Firefox version
+        firefox_manifest_data = generate_manifest_data(host_script_abs_path, chrome_extension_id=None)
+
+        try:
+            with open(manifest_path, "w") as f:
+                json.dump(firefox_manifest_data, f, indent=2)
+            print(f"Installed Firefox dev manifest to {manifest_path}")
+        except IOError as e:
+            print(f"Error writing Firefox manifest: {e}")
+
+    print("\nDevelopment installation complete!")
+    print("NOTE: This script installs to *user* directories for development testing.")
+    print("For store distribution (e.g., .deb package), manifests must be placed")
+    print("in system-wide locations pointing to the packaged host script path.")
 
 if __name__ == "__main__":
     main()
