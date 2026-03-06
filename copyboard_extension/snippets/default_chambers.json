@@ -1,0 +1,180 @@
+{
+    "version": "1.0",
+    "type": "copyboard_snippet_pack",
+    "chambers": [
+        {
+            "name": "Git",
+            "icon": "🔹",
+            "color": "#f05033",
+            "snippets": [
+                {
+                    "label": "Commit all",
+                    "text": "git add -A && git commit -m \"${cursor}\""
+                },
+                {
+                    "label": "Stash pull pop",
+                    "text": "git stash && git pull --rebase && git stash pop"
+                },
+                {
+                    "label": "Log graph",
+                    "text": "git log --oneline --graph --all -20"
+                },
+                {
+                    "label": "Diff cached",
+                    "text": "git diff --cached --stat"
+                },
+                {
+                    "label": "Soft reset",
+                    "text": "git reset --soft HEAD~1"
+                },
+                {
+                    "label": "Cherry pick",
+                    "text": "git cherry-pick ${cursor}"
+                }
+            ]
+        },
+        {
+            "name": "Docker",
+            "icon": "🔸",
+            "color": "#2496ed",
+            "snippets": [
+                {
+                    "label": "Compose up",
+                    "text": "docker compose up -d --build"
+                },
+                {
+                    "label": "PS table",
+                    "text": "docker ps --format 'table {{.Names}}\\t{{.Status}}\\t{{.Ports}}'"
+                },
+                {
+                    "label": "Exec bash",
+                    "text": "docker exec -it ${cursor} /bin/bash"
+                },
+                {
+                    "label": "Prune all",
+                    "text": "docker system prune -af --volumes"
+                },
+                {
+                    "label": "Logs follow",
+                    "text": "docker logs -f --tail 100 ${cursor}"
+                }
+            ]
+        },
+        {
+            "name": "Python",
+            "icon": "🟢",
+            "color": "#3776ab",
+            "snippets": [
+                {
+                    "label": "Main guard",
+                    "text": "if __name__ == '__main__':\n    main()"
+                },
+                {
+                    "label": "Type imports",
+                    "text": "from typing import List, Dict, Optional, Tuple"
+                },
+                {
+                    "label": "Try/except",
+                    "text": "try:\n    ${cursor}\nexcept Exception as e:\n    logger.error(f'Error: {e}')"
+                },
+                {
+                    "label": "Function stub",
+                    "text": "def ${cursor}(self) -> None:\n    \"\"\"${cursor}\"\"\"\n    pass"
+                },
+                {
+                    "label": "Pytest fixture",
+                    "text": "@pytest.fixture\ndef ${cursor}():\n    yield"
+                },
+                {
+                    "label": "List comp",
+                    "text": "[${cursor} for item in ${cursor} if ${cursor}]"
+                }
+            ]
+        },
+        {
+            "name": "Bash",
+            "icon": "🔵",
+            "color": "#4eaa25",
+            "snippets": [
+                {
+                    "label": "Find grep",
+                    "text": "find . -name '*.py' -exec grep -l '${cursor}' {} +"
+                },
+                {
+                    "label": "Curl jq",
+                    "text": "curl -s https://${cursor} | jq ."
+                },
+                {
+                    "label": "Tar compress",
+                    "text": "tar -czvf archive.tar.gz ${cursor}"
+                },
+                {
+                    "label": "SSH tunnel",
+                    "text": "ssh -L 8080:localhost:80 ${cursor}"
+                },
+                {
+                    "label": "Watch procs",
+                    "text": "watch -n 2 'ps aux | sort -nrk 3 | head -10'"
+                },
+                {
+                    "label": "For loop",
+                    "text": "for f in *.${cursor}; do\n    echo \"$f\"\ndone"
+                }
+            ]
+        },
+        {
+            "name": "SQL",
+            "icon": "🟡",
+            "color": "#e38c00",
+            "snippets": [
+                {
+                    "label": "Select",
+                    "text": "SELECT * FROM ${cursor} WHERE 1=1 LIMIT 100;"
+                },
+                {
+                    "label": "Insert",
+                    "text": "INSERT INTO ${cursor} (col1, col2) VALUES (val1, val2);"
+                },
+                {
+                    "label": "Create table",
+                    "text": "CREATE TABLE ${cursor} (\n  id SERIAL PRIMARY KEY,\n  created_at TIMESTAMP DEFAULT NOW()\n);"
+                },
+                {
+                    "label": "Alter add col",
+                    "text": "ALTER TABLE ${cursor} ADD COLUMN ${cursor} TEXT;"
+                },
+                {
+                    "label": "Explain",
+                    "text": "EXPLAIN ANALYZE SELECT ${cursor};"
+                }
+            ]
+        },
+        {
+            "name": "CSS",
+            "icon": "🟣",
+            "color": "#a259ff",
+            "snippets": [
+                {
+                    "label": "Flex center",
+                    "text": "display: flex;\njustify-content: center;\nalign-items: center;"
+                },
+                {
+                    "label": "Media query",
+                    "text": "@media (max-width: 768px) {\n  ${cursor}\n}"
+                },
+                {
+                    "label": "Gradient",
+                    "text": "background: linear-gradient(135deg, ${cursor}, ${cursor});"
+                },
+                {
+                    "label": "Hover scale",
+                    "text": "transition: all 0.3s ease;\n&:hover {\n  transform: scale(1.05);\n}"
+                },
+                {
+                    "label": "Sticky top",
+                    "text": "position: sticky;\ntop: 0;\nz-index: 100;"
+                }
+            ]
+        }
+    ]
+}
