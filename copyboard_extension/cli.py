@@ -2,6 +2,7 @@
 Copyboard CLI - Command-line interface for the multi-clipboard utility
 """
 import argparse
+import json as json_mod
 import sys
 import textwrap
 from typing import List, Optional
@@ -32,8 +33,18 @@ def create_parser() -> argparse.ArgumentParser:
               copyboard snippet add 0 "label" "code"   # Add snippet to chamber 0
               copyboard snippet export out.copyboard   # Export snippet pack
               copyboard snippet import pack.copyboard  # Import snippet pack
+
+            Agent Integration:
+              copyboard profile                  # Show coding fingerprint
+              copyboard profile --json           # JSON output for agents
+              copyboard context generate         # Generate .copyboard-context.md
+              copyboard snippet list --json      # Any command supports --json
         ''')
     )
+
+    # Global --json flag
+    parser.add_argument('--json', action='store_true', dest='json_output',
+                        help='Output results as JSON (for agent consumption)')
     
     subparsers = parser.add_subparsers(dest='command', help='Command to run')
     
@@ -125,6 +136,18 @@ def create_parser() -> argparse.ArgumentParser:
 
     # snippet reset
     snippet_sub.add_parser('reset', help='Reset snippets to defaults')
+
+    # ── Profile command ──────────────────────────────────────────────
+    subparsers.add_parser('profile', help='Show your coding fingerprint (agent profile)')
+
+    # ── Context command ──────────────────────────────────────────────
+    context_parser = subparsers.add_parser(
+        'context', help='Manage .copyboard-context.md for AI agents',
+    )
+    context_sub = context_parser.add_subparsers(dest='context_command')
+    gen_p = context_sub.add_parser('generate', help='Generate .copyboard-context.md')
+    gen_p.add_argument('--dir', type=str, default=None,
+                       help='Output directory (default: current directory)')
 
     return parser
 
@@ -279,6 +302,10 @@ def main(args: Optional[List[str]] = None) -> int:
         return handle_monitor(parsed_args.seconds)
     elif parsed_args.command == 'snippet':
         return handle_snippet(parsed_args)
+    elif parsed_args.command == 'profile':
+        return handle_profile(parsed_args)
+    elif parsed_args.command == 'context':
+        return handle_context(parsed_args)
     else:
         parser.print_help()
         return 1
@@ -399,6 +426,43 @@ def handle_snippet(args) -> int:
     else:
         print("Unknown snippet command.")
         return 1
+
+
+def handle_profile(args) -> int:
+    """Handle the profile command."""
+    from .agent_api import get_profile
+
+    use_json = getattr(args, 'json_output', False)
+    profile = get_profile(as_markdown=not use_json)
+
+    if use_json:
+        print(json_mod.dumps(profile, indent=2, ensure_ascii=False))
+    else:
+        print(profile)
+
+    return 0
+
+
+def handle_context(args) -> int:
+    """Handle the context command."""
+    sub = getattr(args, 'context_command', None)
+    if not sub:
+        print("Usage: copyboard context {generate}")
+        return 1
+
+    if sub == 'generate':
+        from .context_generator import generate_context_file
+        output_dir = getattr(args, 'dir', None)
+        filepath = generate_context_file(output_dir=output_dir)
+        if filepath:
+            print(f"Generated context file: {filepath}")
+            return 0
+        else:
+            print("Error: Could not generate context file (profile disabled or write error).")
+            return 1
+
+    print("Unknown context command.")
+    return 1
 
 
 if __name__ == '__main__':

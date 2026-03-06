@@ -42,6 +42,11 @@ DEFAULT_CONFIG = {
         "auto_capture": True,
         "show_previews": True,
         "preview_length": 50
+    },
+    "agent": {
+        "profile_enabled": True,
+        "context_auto_update": False,
+        "context_file": ".copyboard-context.md"
     }
 }
 
