@@ -8,6 +8,7 @@ Centre      = live preview of the hovered snippet
 
 Navigation:
     Mouse       – hover to select, click to fire
+    Middle-drag – drag the window to reposition
     Arrow keys  – ↑↓ spin chambers, ←→ rotate snippets
     Enter       – fire current snippet
     1-6         – quick-fire chamber by number
@@ -124,6 +125,11 @@ class RevolverUI:
         self._hover_snippet: int = -1
         self._selected_chamber: int = snippets.get_current_chamber_index()
 
+        # Drag state
+        self._dragging: bool = False
+        self._drag_start_x: int = 0
+        self._drag_start_y: int = 0
+
         # Window geometry
         self._win_size = self.OUTER_RADIUS * 2 + self.WINDOW_PAD * 2
         self._cx = self._win_size // 2
@@ -166,7 +172,12 @@ class RevolverUI:
         # Bindings
         self.canvas.bind("<Motion>", self._on_motion)
         self.canvas.bind("<Button-1>", self._on_click)
+        self.canvas.bind("<ButtonRelease-1>", self._on_release)
+        self.canvas.bind("<B1-Motion>", self._on_drag_motion)
         self.canvas.bind("<Button-3>", self._on_right_click)
+        # Middle-click drag (always drags regardless of position)
+        self.canvas.bind("<Button-2>", self._on_drag_start_middle)
+        self.canvas.bind("<B2-Motion>", self._on_drag_motion_middle)
         self.root.bind("<Escape>", lambda e: self._close(cancelled=True))
         self.root.bind("<Return>", lambda e: self._fire_current())
         self.root.bind("<Up>", lambda e: self._key_spin(-1))
@@ -194,6 +205,7 @@ class RevolverUI:
             return
 
         self._draw_background_rings()
+        self._draw_drag_handle()
         self._draw_outer_ring(chambers)
         self._draw_inner_ring(chambers)
         self._draw_center(chambers)
@@ -408,8 +420,64 @@ class RevolverUI:
             justify="center",
         )
 
+    # ── Drag support ──────────────────────────────────────────────────
+    def _is_drag_zone(self, event) -> bool:
+        """Check if click position is in the draggable outer edge."""
+        dx = event.x - self._cx
+        dy = event.y - self._cy
+        dist = math.sqrt(dx * dx + dy * dy)
+        return dist > self.OUTER_RADIUS
+
+    def _on_drag_start_middle(self, event) -> None:
+        """Start drag on middle-click (always drags)."""
+        self._dragging = True
+        self._drag_start_x = event.x_root - self.root.winfo_x()
+        self._drag_start_y = event.y_root - self.root.winfo_y()
+
+    def _on_drag_motion_middle(self, event) -> None:
+        """Move window on middle-button drag."""
+        if self._dragging and self.root:
+            new_x = event.x_root - self._drag_start_x
+            new_y = event.y_root - self._drag_start_y
+            self.root.geometry(f"+{new_x}+{new_y}")
+
+    def _on_drag_motion(self, event) -> None:
+        """Move window on left-button drag (only from outer edge)."""
+        if self._dragging and self.root:
+            new_x = event.x_root - self._drag_start_x
+            new_y = event.y_root - self._drag_start_y
+            self.root.geometry(f"+{new_x}+{new_y}")
+
+    def _on_release(self, event) -> None:
+        """Stop dragging on button release."""
+        self._dragging = False
+
+    def _draw_drag_handle(self) -> None:
+        """Draw a subtle drag handle indicator in the corner."""
+        # Small grip dots in top-right corner
+        gx, gy = self._win_size - 18, 12
+        dot_color = self.theme["text_dim"]
+        for row in range(3):
+            for col in range(2):
+                x = gx + col * 5
+                y = gy + row * 5
+                self.canvas.create_oval(
+                    x, y, x + 3, y + 3,
+                    fill=dot_color, outline="",
+                )
+        # "drag" tooltip area
+        self.canvas.create_text(
+            self._win_size - 12, 30,
+            text="⠿",
+            font=(self.theme["font"], 8),
+            fill=self.theme["text_dim"],
+        )
+
     # ── Mouse events ─────────────────────────────────────────────────
     def _on_motion(self, event) -> None:
+        if self._dragging:
+            return
+
         dx = event.x - self._cx
         dy = event.y - self._cy
         dist = math.sqrt(dx * dx + dy * dy)
@@ -447,6 +515,13 @@ class RevolverUI:
         dx = event.x - self._cx
         dy = event.y - self._cy
         dist = math.sqrt(dx * dx + dy * dy)
+
+        # If clicking the outer edge, start a drag instead of selecting
+        if dist > self.OUTER_RADIUS:
+            self._dragging = True
+            self._drag_start_x = event.x_root - self.root.winfo_x()
+            self._drag_start_y = event.y_root - self.root.winfo_y()
+            return
 
         if dist < self.CENTER_RADIUS:
             # Click centre → fire current
