@@ -267,6 +267,18 @@ def get_board_item(index: int) -> Optional[str]:
         return _board[index]
     return None
 
+
+def update_board_item(index: int, content: str) -> bool:
+    """Replace an existing board item and persist the change immediately."""
+    if index < 0 or index >= len(_board):
+        return False
+
+    _board[index] = content
+    _mark_modified()
+    _save_board(force=True)
+    return True
+
+
 def get_board_size() -> int:
     """
     Return the current size of the clipboard board.

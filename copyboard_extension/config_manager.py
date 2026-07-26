@@ -35,6 +35,11 @@ DEFAULT_CONFIG = {
         "quick_paste_3": "ctrl+alt+3",
         "quick_paste_4": "ctrl+alt+4",
         "quick_paste_5": "ctrl+alt+5",
+        "quick_paste_6": "ctrl+alt+6",
+        "quick_paste_7": "ctrl+alt+7",
+        "quick_paste_8": "ctrl+alt+8",
+        "quick_paste_9": "ctrl+alt+9",
+        "quick_paste_10": "ctrl+alt+0",
         "paste_combo": "ctrl+alt+b"
     },
     "board": {

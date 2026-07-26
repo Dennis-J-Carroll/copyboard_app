@@ -27,17 +27,34 @@ This is still a work and progress and all contributions are welcome.
 - Browser extension
 - Cross-platform (Linux, macOS, Windows)
 
-## Installation
+## Run the desktop app
 
-### Quick Install
+CopyBoard now opens as a ten-chamber clipboard revolver. Each new copy loads
+into chamber 01 and rotates older rounds clockwise.
 
 ```bash
-# Install from PyPI
-pip install copyboard-extension
-
-# Install system-wide integration
-copyboard-install-integration
+# From a clone of this repository
+python3 -m venv .venv
+source .venv/bin/activate
+pip install .
+copyboard-gui
 ```
+
+The app auto-captures new text copied anywhere on the desktop. Click a chamber
+to inspect or edit it, **Copy Only** to place it back on the clipboard, or
+**Fire & Hide** to minimise CopyBoard and paste into the previous app.
+
+Keyboard controls:
+
+- `1`–`9` and `0`: select chambers 01–10
+- Arrow keys: rotate the selected chamber
+- `Enter`: copy the selected round
+- `Ctrl+Enter`: fire, hide, and paste
+- `Ctrl+Shift+C`: capture the current clipboard
+- `Delete`: eject the selected round
+
+On Linux, automatic paste requires `xdotool` on X11. Copy-only and clipboard
+history remain available without it.
 
 ### Platform-Specific Installation
 

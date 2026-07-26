@@ -130,6 +130,14 @@ class TestGetBoard:
     def test_get_board_item_out_of_range(self, isolated_board):
         assert core.get_board_item(5) is None
 
+    def test_update_board_item(self, isolated_board):
+        isolated_board["add"]("before")
+        assert core.update_board_item(0, "after") is True
+        assert isolated_board["get"]() == ["after"]
+
+    def test_update_board_item_rejects_invalid_index(self, isolated_board):
+        assert core.update_board_item(0, "nowhere") is False
+
 
 class TestBoardPreview:
     """Preview generation."""

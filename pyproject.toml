@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "copyboard-extension"
+version = "0.2.0"
+description = "A ten-chamber clipboard revolver for desktop workflows"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+authors = [
+  {name = "Dennis J. Carroll"},
+]
+dependencies = [
+  "pyperclip>=1.8.0",
+]
+
+[project.optional-dependencies]
+hotkeys = ["keyboard>=0.13.5"]
+dev = [
+  "pytest>=7.0",
+  "pytest-cov>=4.0",
+  "pytest-timeout>=2.0",
+  "pytest-mock>=3.0",
+]
+
+[project.scripts]
+copyboard = "copyboard_extension.cli:main"
+copyboard-gui = "copyboard_extension.copyboard_gui:main"
+copyboard-install-integration = "copyboard_extension.system_integration:install_context_menu_integration"
+
+[tool.setuptools.packages.find]
+include = ["copyboard_extension*"]
+
+[tool.setuptools.package-data]
+copyboard_extension = [
+  "snippets/*.json",
+  "browser_extension/*.html",
+  "browser_extension/*.js",
+  "browser_extension/*.json",
+  "browser_extension/icons/*.png",
+]

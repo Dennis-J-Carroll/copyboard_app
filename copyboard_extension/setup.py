@@ -42,7 +42,7 @@ setup(
             "copyboard-install-integration=copyboard_extension.system_integration:install_context_menu_integration",
         ],
         "gui_scripts": [
-            "copyboard-gui=copyboard_extension.gui:run_gui",
+            "copyboard-gui=copyboard_extension.copyboard_gui:main",
         ],
     },
     data_files=data_files,

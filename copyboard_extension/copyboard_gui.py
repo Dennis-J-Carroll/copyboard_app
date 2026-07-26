@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
+"""CopyBoard's revolver-first desktop interface.
+
+The board is deliberately represented as ten fixed, visible chambers. New
+clipboard entries arrive in chamber 1 and older entries rotate clockwise.
 """
-Copyboard GUI - Graphical interface with full mode and compact mini mode.
-Includes runtime-configurable hotkeys dialog.
-"""
+
+import math
 import os
+import re
 import sys
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import messagebox
+from typing import Dict, Optional, Tuple
+
 import pyperclip
-import threading
-import time
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir)
@@ -17,669 +21,904 @@ if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
 
 try:
-    from . import core, paste_helper, hotkeys
+    from . import core, hotkeys, paste_helper
     from .config_manager import config
-except ImportError as e:
-    print(f"Error importing copyboard modules: {e}")
-    sys.exit(1)
+except ImportError as exc:
+    print(f"Error importing CopyBoard modules: {exc}")
+    raise
 
-# ── Color constants for mini mode ──────────────────────────────────────
-BG_DARK = "#1e1e2e"
-CARD_BG = "#2a2a3e"
-CARD_HOVER = "#353550"
-ACCENT = "#7c3aed"
-TEXT_PRIMARY = "#e0e0e0"
-TEXT_SECONDARY = "#a0a0b0"
-HEADER_BG = "#16162a"
-CLOSE_HOVER = "#e74c3c"
 
-# System-reserved combos that users should be warned about
-SYSTEM_RESERVED = {
-    "ctrl+c", "ctrl+v", "ctrl+x", "ctrl+z", "ctrl+y",
-    "ctrl+a", "ctrl+s", "ctrl+w", "ctrl+q", "ctrl+f",
-    "alt+f4", "alt+tab",
-}
+# A warm, physical-tool palette: dark steel, paper, brass, and signal orange.
+INK = "#141512"
+PANEL = "#1B1D19"
+PANEL_RAISED = "#242620"
+PANEL_SOFT = "#2C2E27"
+LINE = "#3C3E35"
+TEXT = "#F2EEDF"
+TEXT_DIM = "#A6A394"
+TEXT_FAINT = "#6F7167"
+ACCENT = "#FF6B35"
+ACCENT_HOVER = "#FF8157"
+BRASS = "#C7A86B"
+MINT = "#8FB996"
+EMPTY = "#20221E"
+ERROR = "#E56B6F"
+
+FONT = "DejaVu Sans"
+MONO = "DejaVu Sans Mono"
+CHAMBER_COUNT = 10
+
+
+def classify_clip(content: str) -> Tuple[str, str]:
+    """Return a short content kind and a chamber mark."""
+    stripped = content.strip()
+    if re.match(r"^https?://\S+$", stripped, re.IGNORECASE):
+        return "LINK", "↗"
+    if "\n" in content and (
+        re.search(r"[{}();=<>]", content)
+        or stripped.startswith(("def ", "class ", "import ", "const ", "function "))
+    ):
+        return "CODE", "{ }"
+    if "\n" in content:
+        return "MULTILINE", "¶"
+    return "TEXT", "T"
+
+
+def compact_preview(content: str, limit: int = 54) -> str:
+    """Create a single-line preview suitable for the chamber readout."""
+    preview = " ".join(content.split())
+    if not preview:
+        return "Empty text"
+    return preview if len(preview) <= limit else preview[: limit - 1].rstrip() + "…"
 
 
 class CopyboardGUI:
-    def __init__(self, root):
+    """A polished ten-chamber clipboard controller."""
+
+    def __init__(self, root: tk.Tk):
         self.root = root
-        self.root.title("Copyboard")
+        self.root.title("CopyBoard — 10 Chamber Clipboard")
+        self.root.configure(bg=INK)
+        self.root.geometry(self._initial_geometry())
+        self.root.minsize(940, 640)
 
-        # ── State from config ──────────────────────────────────────
-        self.is_mini_mode = config.get("window", "mini_mode", False)
-        self._save_position_timer = None
-        self.drag_offset_x = 0
-        self.drag_offset_y = 0
+        # This interface is intentionally a ten-round tool, even if an older
+        # config file previously allowed a larger generic clipboard history.
+        core.set_max_board_size(CHAMBER_COUNT)
 
-        # ── Containers ─────────────────────────────────────────────
-        self.full_frame = ttk.Frame(self.root)
-        self.mini_frame = tk.Frame(self.root, bg=BG_DARK)
+        self.selected_index = 0
+        self.hovered_index: Optional[int] = None
+        self._chamber_centers: Dict[int, Tuple[float, float]] = {}
+        self._poll_job: Optional[str] = None
+        self._status_job: Optional[str] = None
+        self._closing = False
 
-        # Build both layouts
-        self._build_full_mode()
-        self._build_mini_mode()
+        self.auto_capture_var = tk.BooleanVar(
+            value=config.get("board", "auto_capture", True)
+        )
+        self.always_on_top_var = tk.BooleanVar(
+            value=config.get("window", "always_on_top", True)
+        )
+        self.status_var = tk.StringVar(value="Ready")
+        self.slot_var = tk.StringVar()
+        self.kind_var = tk.StringVar()
+        self.meta_var = tk.StringVar()
 
-        # Restore window geometry from config
-        self._restore_geometry()
+        try:
+            self._last_clipboard = pyperclip.paste()
+        except pyperclip.PyperclipException:
+            self._last_clipboard = ""
 
-        # Start in the correct mode
-        if self.is_mini_mode:
-            self.switch_to_mini()
-        else:
-            self.switch_to_full()
-
-        # ── Clipboard monitoring ───────────────────────────────────
-        self.monitor_active = config.get("board", "auto_capture", True)
-        self.monitor_thread = threading.Thread(target=self.monitor_clipboard, daemon=True)
-        self.monitor_thread.start()
-
-        # ── Window events ──────────────────────────────────────────
-        self.root.bind("<Configure>", self._on_window_configure)
+        self._build_ui()
+        self._bind_controls()
+        self._apply_always_on_top()
+        self.refresh()
+        self._schedule_clipboard_poll()
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
-    # ══════════════════════════════════════════════════════════════════
-    #  FULL MODE
-    # ══════════════════════════════════════════════════════════════════
+    def _initial_geometry(self) -> str:
+        width = max(1040, config.get("window", "width", 1040))
+        height = max(680, config.get("window", "height", 680))
+        x = config.get("window", "x", 100)
+        y = config.get("window", "y", 100)
+        return f"{width}x{height}+{x}+{y}"
 
-    def _build_full_mode(self):
-        frame = self.full_frame
-        frame.columnconfigure(0, weight=1)
-        frame.rowconfigure(1, weight=1)
+    # ------------------------------------------------------------------
+    # Layout
+    # ------------------------------------------------------------------
+    def _build_ui(self) -> None:
+        shell = tk.Frame(self.root, bg=INK)
+        shell.pack(fill=tk.BOTH, expand=True)
+        self._build_header(shell)
+        self._build_footer(shell)
 
-        # Header
-        header = ttk.Frame(frame)
-        header.grid(row=0, column=0, sticky="ew", padx=10, pady=(10, 5))
+        body = tk.Frame(shell, bg=INK)
+        body.pack(fill=tk.BOTH, expand=True, padx=22, pady=(10, 14))
+        body.grid_columnconfigure(0, weight=3, uniform="body")
+        body.grid_columnconfigure(1, weight=2, uniform="body")
+        body.grid_rowconfigure(0, weight=1)
 
-        ttk.Label(header, text="Copyboard", font=("Arial", 16, "bold")).pack(side=tk.LEFT)
+        self._build_revolver_panel(body)
+        self._build_detail_panel(body)
 
-        btn_frame = ttk.Frame(header)
-        btn_frame.pack(side=tk.RIGHT)
-
-        ttk.Button(btn_frame, text="Mini Mode", command=self.toggle_mini_mode).pack(side=tk.LEFT, padx=3)
-        ttk.Button(btn_frame, text="Hotkeys", command=self.open_hotkey_settings).pack(side=tk.LEFT, padx=3)
-        ttk.Button(btn_frame, text="Copy Current", command=self.copy_to_board).pack(side=tk.LEFT, padx=3)
-        ttk.Button(btn_frame, text="Clear All", command=self.clear_board).pack(side=tk.LEFT, padx=3)
-        ttk.Button(btn_frame, text="Refresh", command=self.refresh_list).pack(side=tk.LEFT, padx=3)
-
-        # Items area
-        items_frame = ttk.Frame(frame)
-        items_frame.grid(row=1, column=0, sticky="nsew", padx=10, pady=5)
-        items_frame.columnconfigure(0, weight=1)
-        items_frame.rowconfigure(0, weight=1)
-
-        listbox_frame = ttk.Frame(items_frame)
-        listbox_frame.grid(row=0, column=0, sticky="nsew")
-        listbox_frame.columnconfigure(0, weight=1)
-        listbox_frame.rowconfigure(0, weight=1)
-
-        self.listbox = tk.Listbox(
-            listbox_frame, selectmode=tk.EXTENDED, font=("Arial", 10),
-            relief=tk.FLAT, bd=0, highlightthickness=0
-        )
-        self.listbox.grid(row=0, column=0, sticky="nsew")
-
-        scrollbar = ttk.Scrollbar(listbox_frame, orient="vertical", command=self.listbox.yview)
-        scrollbar.grid(row=0, column=1, sticky="ns")
-        self.listbox.config(yscrollcommand=scrollbar.set)
-
-        # Action buttons
-        action_frame = ttk.Frame(items_frame)
-        action_frame.grid(row=0, column=1, sticky="ns", padx=(10, 0))
-
-        for text, cmd in [
-            ("Paste Selected", self.paste_selected),
-            ("Combine & Paste", self.combine_and_paste),
-            ("Remove", self.remove_selected),
-            ("Edit", self.edit_selected),
-        ]:
-            ttk.Button(action_frame, text=text, command=cmd).pack(fill=tk.X, pady=3)
-
-        # Always-on-top checkbox
-        self._aot_var = tk.BooleanVar(value=config.get("window", "always_on_top", True))
-        ttk.Checkbutton(
-            action_frame, text="Always on top",
-            variable=self._aot_var, command=self._toggle_always_on_top
-        ).pack(fill=tk.X, pady=(10, 3))
-
-        # Status bar
-        self.status_var = tk.StringVar()
-        ttk.Label(frame, textvariable=self.status_var, relief=tk.SUNKEN, anchor=tk.W).grid(
-            row=2, column=0, sticky="ew", padx=10, pady=(0, 5)
-        )
-
-    # ══════════════════════════════════════════════════════════════════
-    #  MINI MODE
-    # ══════════════════════════════════════════════════════════════════
-
-    def _build_mini_mode(self):
-        frame = self.mini_frame
-
-        # Header bar for dragging
-        header = tk.Frame(frame, bg=HEADER_BG, height=28)
-        header.pack(fill=tk.X)
+    def _build_header(self, parent: tk.Widget) -> None:
+        header = tk.Frame(parent, bg=INK, height=84)
+        header.pack(fill=tk.X, padx=24, pady=(18, 2))
         header.pack_propagate(False)
 
-        # Drag bindings on header
-        header.bind("<Button-1>", self._on_drag_start)
-        header.bind("<B1-Motion>", self._on_drag_motion)
+        brand = tk.Frame(header, bg=INK)
+        brand.pack(side=tk.LEFT, fill=tk.Y)
+        tk.Label(
+            brand, text="COPYBOARD", bg=INK, fg=TEXT, font=(FONT, 22, "bold")
+        ).pack(anchor=tk.W)
+        tk.Label(
+            brand,
+            text="TEN-CHAMBER CLIPBOARD  /  MK II",
+            bg=INK,
+            fg=BRASS,
+            font=(MONO, 9, "bold"),
+        ).pack(anchor=tk.W, pady=(1, 0))
 
-        title = tk.Label(header, text="Copyboard", fg=TEXT_PRIMARY, bg=HEADER_BG,
-                         font=("Arial", 9, "bold"))
-        title.pack(side=tk.LEFT, padx=8)
-        title.bind("<Button-1>", self._on_drag_start)
-        title.bind("<B1-Motion>", self._on_drag_motion)
+        actions = tk.Frame(header, bg=INK)
+        actions.pack(side=tk.RIGHT, fill=tk.Y)
+        self._make_button(
+            actions, "CAPTURE CURRENT", self.capture_current, variant="accent"
+        ).pack(side=tk.LEFT, padx=(0, 8), pady=12)
+        self._make_button(
+            actions, "SHORTCUTS", self.open_shortcuts, variant="quiet"
+        ).pack(side=tk.LEFT, padx=(0, 12), pady=12)
 
-        # Close button
-        close_btn = tk.Label(header, text="\u00d7", fg=TEXT_SECONDARY, bg=HEADER_BG,
-                             font=("Arial", 14), cursor="hand2")
-        close_btn.pack(side=tk.RIGHT, padx=(0, 6))
-        close_btn.bind("<Button-1>", lambda e: self.on_close())
-        close_btn.bind("<Enter>", lambda e: close_btn.config(fg=CLOSE_HOVER))
-        close_btn.bind("<Leave>", lambda e: close_btn.config(fg=TEXT_SECONDARY))
+        tk.Checkbutton(
+            actions,
+            text="AUTO-CAPTURE",
+            variable=self.auto_capture_var,
+            command=self._toggle_auto_capture,
+            bg=INK,
+            activebackground=INK,
+            fg=MINT,
+            activeforeground=MINT,
+            selectcolor=PANEL_RAISED,
+            font=(MONO, 9, "bold"),
+            cursor="hand2",
+            highlightthickness=0,
+            bd=0,
+        ).pack(side=tk.LEFT, pady=12)
 
-        # Expand button
-        expand_btn = tk.Label(header, text="\u2197", fg=TEXT_SECONDARY, bg=HEADER_BG,
-                              font=("Arial", 12), cursor="hand2")
-        expand_btn.pack(side=tk.RIGHT, padx=2)
-        expand_btn.bind("<Button-1>", lambda e: self.toggle_mini_mode())
-        expand_btn.bind("<Enter>", lambda e: expand_btn.config(fg=ACCENT))
-        expand_btn.bind("<Leave>", lambda e: expand_btn.config(fg=TEXT_SECONDARY))
-
-        # Items container
-        self.mini_items_frame = tk.Frame(frame, bg=BG_DARK)
-        self.mini_items_frame.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
-
-        # Right-click menu for mini mode header
-        self._mini_ctx_menu = tk.Menu(header, tearoff=0)
-        self._mini_ctx_menu.add_checkbutton(
-            label="Always on top",
-            command=self._toggle_always_on_top_mini
+    def _build_revolver_panel(self, parent: tk.Widget) -> None:
+        left = tk.Frame(
+            parent, bg=PANEL, highlightbackground=LINE, highlightthickness=1
         )
-        header.bind("<Button-3>", self._show_mini_context)
+        left.grid(row=0, column=0, sticky="nsew", padx=(0, 9))
+        left.grid_rowconfigure(1, weight=1)
+        left.grid_columnconfigure(0, weight=1)
 
-    def _show_mini_context(self, event):
-        self._mini_ctx_menu.tk_popup(event.x_root, event.y_root)
+        label_row = tk.Frame(left, bg=PANEL)
+        label_row.grid(row=0, column=0, sticky="ew", padx=18, pady=(15, 0))
+        tk.Label(
+            label_row, text="THE BARREL", bg=PANEL, fg=TEXT, font=(MONO, 10, "bold")
+        ).pack(side=tk.LEFT)
+        tk.Label(
+            label_row,
+            text="NEWEST ROUND LOADS AT 01",
+            bg=PANEL,
+            fg=TEXT_FAINT,
+            font=(MONO, 8),
+        ).pack(side=tk.RIGHT)
 
-    def _toggle_always_on_top_mini(self):
-        current = config.get("window", "always_on_top", True)
-        new_val = not current
-        config.set("window", "always_on_top", new_val)
-        self.root.attributes("-topmost", new_val)
+        self.canvas = tk.Canvas(
+            left, bg=PANEL, bd=0, highlightthickness=0, cursor="hand2"
+        )
+        self.canvas.grid(row=1, column=0, sticky="nsew", padx=8, pady=5)
+        self.canvas.bind("<Configure>", lambda _event: self.draw_revolver())
+        self.canvas.bind("<Motion>", self._on_canvas_motion)
+        self.canvas.bind("<Leave>", self._on_canvas_leave)
+        self.canvas.bind("<Button-1>", self._on_canvas_click)
+        self.canvas.bind("<Double-Button-1>", self._on_canvas_double_click)
 
-    def _refresh_mini_items(self):
-        """Rebuild compact cards in mini mode."""
-        for widget in self.mini_items_frame.winfo_children():
-            widget.destroy()
+        tk.Label(
+            left,
+            text="CLICK TO SELECT   •   DOUBLE-CLICK TO COPY   •   1–9 / 0 SELECT",
+            bg=PANEL,
+            fg=TEXT_FAINT,
+            font=(MONO, 8),
+        ).grid(row=2, column=0, sticky="ew", pady=(0, 13))
 
-        items = core.get_board()
-        max_show = 8
-        preview_len = config.get("board", "preview_length", 50)
+    def _build_detail_panel(self, parent: tk.Widget) -> None:
+        right = tk.Frame(
+            parent, bg=PANEL, highlightbackground=LINE, highlightthickness=1
+        )
+        right.grid(row=0, column=1, sticky="nsew", padx=(9, 0))
+        right.grid_columnconfigure(0, weight=1)
+        right.grid_rowconfigure(2, weight=1)
 
-        for idx, item in enumerate(items[:max_show]):
-            preview = item.replace("\n", "\u21b5 ")
-            if len(preview) > preview_len:
-                preview = preview[:preview_len - 3] + "..."
+        heading = tk.Frame(right, bg=PANEL)
+        heading.grid(row=0, column=0, sticky="ew", padx=22, pady=(22, 12))
+        tk.Label(
+            heading,
+            textvariable=self.slot_var,
+            bg=PANEL,
+            fg=ACCENT,
+            font=(MONO, 10, "bold"),
+        ).pack(anchor=tk.W)
+        tk.Label(
+            heading,
+            textvariable=self.kind_var,
+            bg=PANEL,
+            fg=TEXT,
+            font=(FONT, 22, "bold"),
+        ).pack(anchor=tk.W, pady=(4, 0))
+        tk.Label(
+            heading,
+            textvariable=self.meta_var,
+            bg=PANEL,
+            fg=TEXT_DIM,
+            font=(MONO, 9),
+        ).pack(anchor=tk.W, pady=(3, 0))
 
-            card = tk.Frame(self.mini_items_frame, bg=CARD_BG, cursor="hand2")
-            card.pack(fill=tk.X, pady=2)
+        tk.Frame(right, bg=LINE, height=1).grid(
+            row=1, column=0, sticky="ew", padx=22
+        )
+        editor_frame = tk.Frame(right, bg=PANEL)
+        editor_frame.grid(row=2, column=0, sticky="nsew", padx=22, pady=18)
+        editor_frame.grid_columnconfigure(0, weight=1)
+        editor_frame.grid_rowconfigure(1, weight=1)
+        tk.Label(
+            editor_frame,
+            text="ROUND CONTENT",
+            bg=PANEL,
+            fg=TEXT_FAINT,
+            font=(MONO, 8, "bold"),
+        ).grid(row=0, column=0, sticky="w", pady=(0, 8))
 
-            badge = tk.Label(card, text=str(idx), fg="#fff", bg=ACCENT,
-                             font=("Arial", 8, "bold"), width=2)
-            badge.pack(side=tk.LEFT, padx=(4, 6), pady=4)
+        text_shell = tk.Frame(
+            editor_frame,
+            bg=PANEL_RAISED,
+            highlightbackground=LINE,
+            highlightthickness=1,
+        )
+        text_shell.grid(row=1, column=0, sticky="nsew")
+        text_shell.grid_columnconfigure(0, weight=1)
+        text_shell.grid_rowconfigure(0, weight=1)
+        self.editor = tk.Text(
+            text_shell,
+            wrap=tk.WORD,
+            bg=PANEL_RAISED,
+            fg=TEXT,
+            insertbackground=ACCENT,
+            selectbackground=ACCENT,
+            selectforeground=INK,
+            font=(MONO, 10),
+            relief=tk.FLAT,
+            bd=0,
+            padx=15,
+            pady=14,
+            undo=True,
+        )
+        self.editor.grid(row=0, column=0, sticky="nsew")
+        scrollbar = tk.Scrollbar(
+            text_shell,
+            command=self.editor.yview,
+            bg=PANEL_RAISED,
+            troughcolor=PANEL,
+            activebackground=ACCENT,
+            relief=tk.FLAT,
+            bd=0,
+            width=10,
+        )
+        scrollbar.grid(row=0, column=1, sticky="ns")
+        self.editor.configure(yscrollcommand=scrollbar.set)
 
-            text_lbl = tk.Label(card, text=preview, fg=TEXT_PRIMARY, bg=CARD_BG,
-                                font=("Arial", 9), anchor=tk.W)
-            text_lbl.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 4), pady=4)
+        controls = tk.Frame(right, bg=PANEL)
+        controls.grid(row=3, column=0, sticky="ew", padx=22, pady=(0, 12))
+        controls.grid_columnconfigure((0, 1), weight=1)
+        self.fire_button = self._make_button(
+            controls, "FIRE & HIDE", self.fire_selected, variant="accent"
+        )
+        self.fire_button.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 8))
+        self.copy_button = self._make_button(
+            controls, "COPY ONLY", self.copy_selected, variant="light"
+        )
+        self.copy_button.grid(row=1, column=0, sticky="ew", padx=(0, 4))
+        self.save_button = self._make_button(
+            controls, "SAVE EDIT", self.save_editor, variant="quiet"
+        )
+        self.save_button.grid(row=1, column=1, sticky="ew", padx=(4, 0))
 
-            # Click-to-copy
-            for widget in (card, badge, text_lbl):
-                widget.bind("<Button-1>", lambda e, i=idx: self._mini_click_copy(i))
-                widget.bind("<Enter>", lambda e, c=card: c.config(bg=CARD_HOVER) or
-                            [w.config(bg=CARD_HOVER) for w in c.winfo_children()
-                             if isinstance(w, tk.Label) and w.cget("bg") != ACCENT])
-                widget.bind("<Leave>", lambda e, c=card: c.config(bg=CARD_BG) or
-                            [w.config(bg=CARD_BG) for w in c.winfo_children()
-                             if isinstance(w, tk.Label) and w.cget("bg") != ACCENT])
+        utility = tk.Frame(right, bg=PANEL)
+        utility.grid(row=4, column=0, sticky="ew", padx=22, pady=(0, 18))
+        self._make_text_action(
+            utility, "EJECT ROUND", self.eject_selected, ERROR
+        ).pack(side=tk.LEFT)
+        self._make_text_action(
+            utility, "CLEAR BARREL", self.clear_board, TEXT_FAINT
+        ).pack(side=tk.RIGHT)
 
-        overflow = len(items) - max_show
-        if overflow > 0:
-            tk.Label(self.mini_items_frame, text=f"...and {overflow} more",
-                     fg=TEXT_SECONDARY, bg=BG_DARK, font=("Arial", 8)).pack(pady=(2, 0))
+    def _build_footer(self, parent: tk.Widget) -> None:
+        footer = tk.Frame(parent, bg=PANEL_RAISED, height=34)
+        footer.pack(fill=tk.X, side=tk.BOTTOM)
+        footer.pack_propagate(False)
+        self.status_dot = tk.Canvas(
+            footer, width=22, height=22, bg=PANEL_RAISED, highlightthickness=0
+        )
+        self.status_dot.pack(side=tk.LEFT, padx=(20, 0), pady=6)
+        self.status_dot.create_oval(7, 7, 15, 15, fill=MINT, outline="")
+        tk.Label(
+            footer,
+            textvariable=self.status_var,
+            bg=PANEL_RAISED,
+            fg=TEXT_DIM,
+            font=(MONO, 8),
+        ).pack(side=tk.LEFT, padx=(0, 12))
+        tk.Checkbutton(
+            footer,
+            text="PIN WINDOW",
+            variable=self.always_on_top_var,
+            command=self._toggle_always_on_top,
+            bg=PANEL_RAISED,
+            activebackground=PANEL_RAISED,
+            fg=TEXT_FAINT,
+            activeforeground=TEXT,
+            selectcolor=PANEL,
+            font=(MONO, 8),
+            cursor="hand2",
+            highlightthickness=0,
+            bd=0,
+        ).pack(side=tk.RIGHT, padx=18)
+        tk.Label(
+            footer,
+            text="↑ ↓ CYCLE   ENTER COPY   CTRL+ENTER FIRE   DEL EJECT",
+            bg=PANEL_RAISED,
+            fg=TEXT_FAINT,
+            font=(MONO, 8),
+        ).pack(side=tk.RIGHT, padx=10)
 
-    def _mini_click_copy(self, index):
-        item = core.get_board_item(index)
-        if item:
-            pyperclip.copy(item)
+    def _make_button(
+        self, parent: tk.Widget, text: str, command, variant: str = "quiet"
+    ) -> tk.Button:
+        colors = {
+            "accent": (ACCENT, INK, ACCENT_HOVER, INK),
+            "light": (TEXT, INK, "#FFFFFF", INK),
+            "quiet": (PANEL_SOFT, TEXT, LINE, TEXT),
+        }
+        bg, fg, active_bg, active_fg = colors[variant]
+        return tk.Button(
+            parent,
+            text=text,
+            command=command,
+            bg=bg,
+            fg=fg,
+            activebackground=active_bg,
+            activeforeground=active_fg,
+            disabledforeground=TEXT_FAINT,
+            relief=tk.FLAT,
+            bd=0,
+            padx=14,
+            pady=10,
+            cursor="hand2",
+            font=(MONO, 9, "bold"),
+            highlightthickness=0,
+        )
 
-    # ══════════════════════════════════════════════════════════════════
-    #  MODE TOGGLING
-    # ══════════════════════════════════════════════════════════════════
+    def _make_text_action(
+        self, parent: tk.Widget, text: str, command, color: str
+    ) -> tk.Button:
+        return tk.Button(
+            parent,
+            text=text,
+            command=command,
+            bg=PANEL,
+            fg=color,
+            activebackground=PANEL,
+            activeforeground=TEXT,
+            relief=tk.FLAT,
+            bd=0,
+            cursor="hand2",
+            font=(MONO, 8, "bold"),
+            highlightthickness=0,
+        )
 
-    def toggle_mini_mode(self):
-        self.is_mini_mode = not self.is_mini_mode
-        config.set("window", "mini_mode", self.is_mini_mode)
-        if self.is_mini_mode:
-            self.switch_to_mini()
-        else:
-            self.switch_to_full()
-
-    def switch_to_mini(self):
-        # Save full-mode geometry
-        self._save_window_position()
-        self.full_frame.pack_forget()
-
-        self.root.overrideredirect(True)
-        self.root.attributes("-topmost", config.get("window", "always_on_top", True))
-
-        # Apply mini dimensions
-        w, h = 280, 40 + min(core.get_board_size(), 8) * 34 + 8
-        x = config.get("window", "x", 100)
-        y = config.get("window", "y", 100)
-        self.root.geometry(f"{w}x{h}+{x}+{y}")
-
-        self.mini_frame.pack(fill=tk.BOTH, expand=True)
-        self._refresh_mini_items()
-
-    def switch_to_full(self):
-        self._save_window_position()
-        self.mini_frame.pack_forget()
-
-        self.root.overrideredirect(False)
-        self.root.title("Copyboard")
-
-        w = config.get("window", "width", 600)
-        h = config.get("window", "height", 400)
-        x = config.get("window", "x", 100)
-        y = config.get("window", "y", 100)
-        self.root.geometry(f"{w}x{h}+{x}+{y}")
-        self.root.minsize(500, 300)
-
-        aot = config.get("window", "always_on_top", True)
-        self.root.attributes("-topmost", aot)
-
-        self.full_frame.pack(fill=tk.BOTH, expand=True)
-        self.refresh_list()
-
-    # ══════════════════════════════════════════════════════════════════
-    #  WINDOW POSITION PERSISTENCE
-    # ══════════════════════════════════════════════════════════════════
-
-    def _restore_geometry(self):
-        w = config.get("window", "width", 600)
-        h = config.get("window", "height", 400)
-        x = config.get("window", "x", 100)
-        y = config.get("window", "y", 100)
-        self.root.geometry(f"{w}x{h}+{x}+{y}")
-
-    def _on_window_configure(self, event):
-        if event.widget != self.root:
+    # ------------------------------------------------------------------
+    # Revolver drawing and input
+    # ------------------------------------------------------------------
+    def draw_revolver(self) -> None:
+        if not self.canvas.winfo_exists():
             return
-        if self._save_position_timer:
-            self.root.after_cancel(self._save_position_timer)
-        self._save_position_timer = self.root.after(500, self._save_window_position)
+        self.canvas.delete("all")
+        width = max(520, self.canvas.winfo_width())
+        height = max(510, self.canvas.winfo_height())
+        cx = width / 2
+        cy = height / 2 + 4
+        radius = min(width, height) * 0.34
+        chamber_radius = max(32, min(44, radius * 0.23))
+        items = core.get_board()
 
-    def _save_window_position(self):
+        self.canvas.create_oval(
+            cx - radius - 69,
+            cy - radius - 61,
+            cx + radius + 69,
+            cy + radius + 77,
+            fill="#10110F",
+            outline="",
+        )
+        self.canvas.create_oval(
+            cx - radius - 66,
+            cy - radius - 66,
+            cx + radius + 66,
+            cy + radius + 66,
+            fill=PANEL_RAISED,
+            outline=LINE,
+            width=2,
+        )
+        self.canvas.create_oval(
+            cx - radius - 40,
+            cy - radius - 40,
+            cx + radius + 40,
+            cy + radius + 40,
+            fill="#191B17",
+            outline="#30322B",
+            width=2,
+        )
+
+        self._chamber_centers.clear()
+        for index in range(CHAMBER_COUNT):
+            angle = math.radians(-90 + index * (360 / CHAMBER_COUNT))
+            x = cx + radius * math.cos(angle)
+            y = cy + radius * math.sin(angle)
+            self._chamber_centers[index] = (x, y)
+            self._draw_chamber(index, x, y, chamber_radius, items)
+
+        hub_radius = max(58, chamber_radius * 1.38)
+        self.canvas.create_oval(
+            cx - hub_radius - 5,
+            cy - hub_radius - 5,
+            cx + hub_radius + 5,
+            cy + hub_radius + 5,
+            fill=INK,
+            outline=BRASS,
+            width=2,
+        )
+        self.canvas.create_oval(
+            cx - hub_radius + 8,
+            cy - hub_radius + 8,
+            cx + hub_radius - 8,
+            cy + hub_radius - 8,
+            fill=PANEL,
+            outline=LINE,
+            width=1,
+        )
+        self.canvas.create_text(
+            cx, cy - 17, text=f"{len(items):02d}", fill=TEXT, font=(MONO, 26, "bold")
+        )
+        self.canvas.create_text(
+            cx, cy + 14, text="/ 10 LOADED", fill=BRASS, font=(MONO, 8, "bold")
+        )
+        self.canvas.create_text(
+            cx,
+            cy + 35,
+            text="READY" if items else "EMPTY",
+            fill=MINT if items else TEXT_FAINT,
+            font=(MONO, 8, "bold"),
+        )
+
+    def _draw_chamber(self, index, x, y, radius, items) -> None:
+        occupied = index < len(items)
+        selected = index == self.selected_index
+        hovered = index == self.hovered_index
+        if selected:
+            outer_fill, outline, width = ACCENT, ACCENT, 3
+        elif hovered:
+            outer_fill, outline, width = PANEL_SOFT, BRASS, 2
+        else:
+            outer_fill, outline, width = PANEL_SOFT, LINE, 2
+
+        self.canvas.create_oval(
+            x - radius - 6,
+            y - radius - 6,
+            x + radius + 6,
+            y + radius + 6,
+            fill=outer_fill,
+            outline=outline,
+            width=width,
+        )
+        self.canvas.create_oval(
+            x - radius,
+            y - radius,
+            x + radius,
+            y + radius,
+            fill=INK if occupied else EMPTY,
+            outline="#090A08",
+            width=2,
+        )
+        self.canvas.create_text(
+            x,
+            y - 13,
+            text=f"{index + 1:02d}",
+            fill=INK if selected else (BRASS if occupied else TEXT_FAINT),
+            font=(MONO, 12, "bold"),
+        )
+        if occupied:
+            kind, mark = classify_clip(items[index])
+            self.canvas.create_text(
+                x, y + 9, text=mark, fill=TEXT, font=(MONO, 10, "bold")
+            )
+            self.canvas.create_text(
+                x,
+                y + radius + 17,
+                text=kind,
+                fill=ACCENT if selected else TEXT_FAINT,
+                font=(MONO, 7, "bold"),
+            )
+        else:
+            self.canvas.create_text(
+                x, y + 10, text="—", fill=TEXT_FAINT, font=(MONO, 12)
+            )
+
+    def _chamber_at(self, x: int, y: int) -> Optional[int]:
+        for index, (cx, cy) in self._chamber_centers.items():
+            if math.hypot(x - cx, y - cy) <= 52:
+                return index
+        return None
+
+    def _on_canvas_motion(self, event) -> None:
+        hovered = self._chamber_at(event.x, event.y)
+        if hovered != self.hovered_index:
+            self.hovered_index = hovered
+            self.draw_revolver()
+            if hovered is not None:
+                item = core.get_board_item(hovered)
+                self._set_status(
+                    compact_preview(item)
+                    if item is not None
+                    else f"Chamber {hovered + 1:02d} is empty",
+                    temporary=False,
+                )
+
+    def _on_canvas_leave(self, _event) -> None:
+        if self.hovered_index is not None:
+            self.hovered_index = None
+            self.draw_revolver()
+        self._set_status("Ready", temporary=False)
+
+    def _on_canvas_click(self, event) -> None:
+        index = self._chamber_at(event.x, event.y)
+        if index is not None:
+            self.select_chamber(index)
+
+    def _on_canvas_double_click(self, event) -> None:
+        index = self._chamber_at(event.x, event.y)
+        if index is not None:
+            self.select_chamber(index)
+            self.copy_selected()
+
+    def select_chamber(self, index: int) -> None:
+        self.selected_index = max(0, min(CHAMBER_COUNT - 1, index))
+        self._refresh_detail()
+        self.draw_revolver()
+
+    # ------------------------------------------------------------------
+    # Board actions
+    # ------------------------------------------------------------------
+    def refresh(self, select_newest: bool = False) -> None:
+        if select_newest:
+            self.selected_index = 0
+        self.selected_index = min(self.selected_index, CHAMBER_COUNT - 1)
+        self._refresh_detail()
+        self.draw_revolver()
+
+    def _refresh_detail(self) -> None:
+        content = core.get_board_item(self.selected_index)
+        slot = self.selected_index + 1
+        self.slot_var.set(f"CHAMBER {slot:02d} / {CHAMBER_COUNT:02d}")
+        self.editor.configure(state=tk.NORMAL)
+        self.editor.delete("1.0", tk.END)
+
+        if content is None:
+            self.kind_var.set("Empty chamber")
+            self.meta_var.set("AVAILABLE  •  PASTE OR TYPE A NEW ROUND")
+            self.fire_button.configure(state=tk.DISABLED)
+            self.copy_button.configure(state=tk.DISABLED)
+            self.save_button.configure(text="LOAD TEXT")
+        else:
+            kind, _mark = classify_clip(content)
+            line_count = max(1, content.count("\n") + 1)
+            self.kind_var.set(f"{kind.title()} round")
+            self.meta_var.set(
+                f"{kind}  •  {len(content):,} CHARACTERS  •  {line_count} "
+                f"{'LINE' if line_count == 1 else 'LINES'}"
+            )
+            self.editor.insert("1.0", content)
+            self.fire_button.configure(state=tk.NORMAL)
+            self.copy_button.configure(state=tk.NORMAL)
+            self.save_button.configure(text="SAVE EDIT")
+        self.editor.edit_reset()
+
+    def capture_current(self) -> None:
+        try:
+            content = pyperclip.paste()
+        except pyperclip.PyperclipException as exc:
+            self._set_status(f"Clipboard unavailable: {exc}", error=True)
+            return
+        if not isinstance(content, str) or not content:
+            self._set_status("Clipboard has no text to capture", error=True)
+            return
+        self._last_clipboard = content
+        core.copy_to_board(content)
+        self.refresh(select_newest=True)
+        self._set_status("Current clipboard loaded into chamber 01")
+
+    def copy_selected(self) -> None:
+        content = core.get_board_item(self.selected_index)
+        if content is None:
+            self._set_status("That chamber is empty", error=True)
+            return
+        try:
+            pyperclip.copy(content)
+        except pyperclip.PyperclipException as exc:
+            self._set_status(f"Could not reach clipboard: {exc}", error=True)
+            return
+        self._last_clipboard = content
+        self._set_status(f"Chamber {self.selected_index + 1:02d} copied")
+
+    def fire_selected(self) -> None:
+        content = core.get_board_item(self.selected_index)
+        if content is None:
+            self._set_status("That chamber is empty", error=True)
+            return
+        try:
+            pyperclip.copy(content)
+        except pyperclip.PyperclipException as exc:
+            self._set_status(f"Could not reach clipboard: {exc}", error=True)
+            return
+        self._last_clipboard = content
+        self._set_status(f"Fired chamber {self.selected_index + 1:02d}")
+        self.root.iconify()
+        self.root.after(220, paste_helper.paste_current_clipboard)
+
+    def save_editor(self) -> None:
+        content = self.editor.get("1.0", "end-1c")
+        existing = core.get_board_item(self.selected_index)
+        if existing is None:
+            if not content:
+                self._set_status("Type or paste some text before loading", error=True)
+                return
+            core.copy_to_board(content)
+            self.selected_index = 0
+            self._last_clipboard = content
+            action = "Loaded a new round into chamber 01"
+        else:
+            if not core.update_board_item(self.selected_index, content):
+                self._set_status("Could not save this chamber", error=True)
+                return
+            action = f"Saved chamber {self.selected_index + 1:02d}"
+        self.refresh()
+        self._set_status(action)
+
+    def eject_selected(self) -> None:
+        if core.get_board_item(self.selected_index) is None:
+            self._set_status("That chamber is already empty", error=True)
+            return
+        slot = self.selected_index + 1
+        if core.drop_item(self.selected_index):
+            if self.selected_index >= core.get_board_size() and self.selected_index > 0:
+                self.selected_index -= 1
+            core.force_save()
+            self.refresh()
+            self._set_status(f"Ejected chamber {slot:02d}")
+
+    def clear_board(self) -> None:
+        if not core.get_board():
+            self._set_status("The barrel is already empty")
+            return
+        if messagebox.askyesno(
+            "Clear the barrel?",
+            "This ejects all ten clipboard rounds. This cannot be undone.",
+            parent=self.root,
+        ):
+            core.clear_board()
+            self.selected_index = 0
+            self.refresh()
+            self._set_status("All chambers cleared")
+
+    # ------------------------------------------------------------------
+    # Monitoring, settings, and keyboard
+    # ------------------------------------------------------------------
+    def _schedule_clipboard_poll(self) -> None:
+        self._poll_job = self.root.after(650, self._poll_clipboard)
+
+    def _poll_clipboard(self) -> None:
+        if self._closing:
+            return
+        try:
+            current = pyperclip.paste()
+            if (
+                self.auto_capture_var.get()
+                and isinstance(current, str)
+                and current
+                and current != self._last_clipboard
+            ):
+                self._last_clipboard = current
+                core.copy_to_board(current)
+                self.refresh(select_newest=True)
+                self._set_status("New clipboard text auto-loaded into chamber 01")
+            elif isinstance(current, str):
+                self._last_clipboard = current
+        except pyperclip.PyperclipException:
+            pass
+        self._schedule_clipboard_poll()
+
+    def _toggle_auto_capture(self) -> None:
+        enabled = self.auto_capture_var.get()
+        config.set("board", "auto_capture", enabled)
+        self._set_status(f"Auto-capture {'armed' if enabled else 'paused'}")
+
+    def _apply_always_on_top(self) -> None:
+        try:
+            self.root.attributes("-topmost", self.always_on_top_var.get())
+        except tk.TclError:
+            pass
+
+    def _toggle_always_on_top(self) -> None:
+        enabled = self.always_on_top_var.get()
+        config.set("window", "always_on_top", enabled)
+        self._apply_always_on_top()
+        self._set_status(f"Window pin {'enabled' if enabled else 'disabled'}")
+
+    def _bind_controls(self) -> None:
+        for key in range(1, 10):
+            self.root.bind(
+                str(key), lambda _event, index=key - 1: self._select_from_key(index)
+            )
+        self.root.bind("0", lambda _event: self._select_from_key(9))
+        self.root.bind("<Up>", lambda _event: self._cycle(-1))
+        self.root.bind("<Left>", lambda _event: self._cycle(-1))
+        self.root.bind("<Down>", lambda _event: self._cycle(1))
+        self.root.bind("<Right>", lambda _event: self._cycle(1))
+        self.root.bind("<Return>", self._on_return)
+        self.root.bind("<Control-Return>", lambda _event: self.fire_selected())
+        self.root.bind("<Delete>", self._on_delete)
+        self.root.bind("<Control-s>", lambda _event: self.save_editor())
+        self.root.bind("<Control-Shift-C>", lambda _event: self.capture_current())
+
+    def _select_from_key(self, index: int) -> None:
+        if self.root.focus_get() != self.editor:
+            self.select_chamber(index)
+
+    def _cycle(self, direction: int) -> None:
+        if self.root.focus_get() != self.editor:
+            self.select_chamber((self.selected_index + direction) % CHAMBER_COUNT)
+
+    def _on_return(self, _event) -> None:
+        if self.root.focus_get() == self.editor:
+            return
+        self.copy_selected()
+
+    def _on_delete(self, _event) -> None:
+        if self.root.focus_get() != self.editor:
+            self.eject_selected()
+
+    def open_shortcuts(self) -> None:
+        ShortcutsDialog(self.root)
+
+    def _set_status(
+        self, message: str, error: bool = False, temporary: bool = True
+    ) -> None:
+        self.status_var.set(message)
+        self.status_dot.delete("all")
+        self.status_dot.create_oval(
+            7, 7, 15, 15, fill=ERROR if error else MINT, outline=""
+        )
+        if self._status_job:
+            try:
+                self.root.after_cancel(self._status_job)
+            except tk.TclError:
+                pass
+            self._status_job = None
+        if temporary:
+            self._status_job = self.root.after(
+                3200, lambda: self._set_status("Ready", temporary=False)
+            )
+
+    def on_close(self) -> None:
+        self._closing = True
+        if self._poll_job:
+            try:
+                self.root.after_cancel(self._poll_job)
+            except tk.TclError:
+                pass
         config.set("window", "x", self.root.winfo_x())
         config.set("window", "y", self.root.winfo_y())
-        if not self.is_mini_mode:
-            config.set("window", "width", self.root.winfo_width())
-            config.set("window", "height", self.root.winfo_height())
-
-    # ══════════════════════════════════════════════════════════════════
-    #  DRAGGING (mini mode borderless window)
-    # ══════════════════════════════════════════════════════════════════
-
-    def _on_drag_start(self, event):
-        self.drag_offset_x = event.x
-        self.drag_offset_y = event.y
-
-    def _on_drag_motion(self, event):
-        x = self.root.winfo_pointerx() - self.drag_offset_x
-        y = self.root.winfo_pointery() - self.drag_offset_y
-        self.root.geometry(f"+{x}+{y}")
-
-    # ══════════════════════════════════════════════════════════════════
-    #  ALWAYS ON TOP
-    # ══════════════════════════════════════════════════════════════════
-
-    def _toggle_always_on_top(self):
-        val = self._aot_var.get()
-        config.set("window", "always_on_top", val)
-        self.root.attributes("-topmost", val)
-
-    # ══════════════════════════════════════════════════════════════════
-    #  FULL MODE ACTIONS (same as before)
-    # ══════════════════════════════════════════════════════════════════
-
-    def refresh_list(self):
-        self.listbox.delete(0, tk.END)
-        items = core.get_board()
-        preview_len = config.get("board", "preview_length", 50)
-        for idx, item in enumerate(items):
-            preview = item[:preview_len - 3] + "..." if len(item) > preview_len else item
-            preview = preview.replace("\n", "\u21b5 ")
-            self.listbox.insert(tk.END, f"{idx}: {preview}")
-        self.status_var.set(f"Clipboard items: {len(items)}")
-
-        # Also refresh mini items if visible
-        if self.is_mini_mode:
-            self._refresh_mini_items()
-
-    def copy_to_board(self):
-        core.copy_to_board()
-        self.refresh_list()
-        self.status_var.set("Copied current clipboard to board")
-
-    def paste_selected(self):
-        selection = self.listbox.curselection()
-        if not selection:
-            messagebox.showinfo("Copyboard", "Please select an item to paste")
-            return
-        item_idx = int(self.listbox.get(selection[0]).split(":")[0])
-        if core.paste_from_board(item_idx):
-            self.status_var.set(f"Pasted item {item_idx}")
-        else:
-            self.status_var.set("Failed to paste item")
-
-    def combine_and_paste(self):
-        selection = self.listbox.curselection()
-        if not selection:
-            messagebox.showinfo("Copyboard", "Please select items to combine")
-            return
-        indices = [int(self.listbox.get(s).split(":")[0]) for s in selection]
-        if core.paste_combination(indices):
-            self.status_var.set(f"Pasted combined items: {', '.join(map(str, indices))}")
-        else:
-            self.status_var.set("Failed to paste combined items")
-
-    def remove_selected(self):
-        selection = self.listbox.curselection()
-        if not selection:
-            messagebox.showinfo("Copyboard", "Please select items to remove")
-            return
-        indices = sorted(
-            [int(self.listbox.get(s).split(":")[0]) for s in selection],
-            reverse=True
-        )
-        for idx in indices:
-            core.drop_item(idx)
-        self.refresh_list()
-        self.status_var.set(f"Removed {len(indices)} item(s)")
-
-    def edit_selected(self):
-        selection = self.listbox.curselection()
-        if not selection:
-            messagebox.showinfo("Copyboard", "Please select an item to edit")
-            return
-        item_idx = int(self.listbox.get(selection[0]).split(":")[0])
-        item_content = core.get_board_item(item_idx)
-
-        edit_win = tk.Toplevel(self.root)
-        edit_win.title(f"Edit Clipboard Item {item_idx}")
-        edit_win.geometry("500x300")
-        edit_win.minsize(400, 200)
-        edit_win.transient(self.root)
-        edit_win.grab_set()
-
-        text_frame = ttk.Frame(edit_win, padding=10)
-        text_frame.pack(fill=tk.BOTH, expand=True)
-
-        text_widget = tk.Text(text_frame, wrap=tk.WORD, font=("Arial", 10))
-        text_widget.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
-        sb = ttk.Scrollbar(text_frame, orient="vertical", command=text_widget.yview)
-        sb.pack(side=tk.RIGHT, fill=tk.Y)
-        text_widget.config(yscrollcommand=sb.set)
-        text_widget.insert("1.0", item_content or "")
-
-        btn_frame = ttk.Frame(edit_win, padding=10)
-        btn_frame.pack(fill=tk.X)
-
-        def save_changes():
-            new_content = text_widget.get("1.0", tk.END).rstrip("\n")
-            board = core.get_board()
-            if item_idx < len(board):
-                core._board[item_idx] = new_content
-                core._mark_modified()
-                core._save_board(force=True)
-            edit_win.destroy()
-            self.refresh_list()
-            self.status_var.set(f"Updated item {item_idx}")
-
-        ttk.Button(btn_frame, text="Save", command=save_changes).pack(side=tk.RIGHT, padx=5)
-        ttk.Button(btn_frame, text="Cancel", command=edit_win.destroy).pack(side=tk.RIGHT, padx=5)
-        text_widget.focus_set()
-
-    def clear_board(self):
-        if messagebox.askyesno("Copyboard", "Clear all clipboard items?"):
-            core.clear_board()
-            self.refresh_list()
-            self.status_var.set("Cleared all clipboard items")
-
-    # ══════════════════════════════════════════════════════════════════
-    #  CLIPBOARD MONITORING
-    # ══════════════════════════════════════════════════════════════════
-
-    def monitor_clipboard(self):
-        last_content = pyperclip.paste()
-        while self.monitor_active:
-            try:
-                current = pyperclip.paste()
-                if current != last_content:
-                    last_content = current
-                    if config.get("board", "auto_capture", True):
-                        core.copy_to_board()
-                        self.root.after(0, self.refresh_list)
-            except Exception:
-                pass
-            time.sleep(0.5)
-
-    # ══════════════════════════════════════════════════════════════════
-    #  HOTKEY SETTINGS DIALOG (Phase 3)
-    # ══════════════════════════════════════════════════════════════════
-
-    def open_hotkey_settings(self):
-        HotkeySettingsDialog(self.root)
-
-    # ══════════════════════════════════════════════════════════════════
-    #  CLOSE
-    # ══════════════════════════════════════════════════════════════════
-
-    def on_close(self):
-        self.monitor_active = False
-        self._save_window_position()
+        config.set("window", "width", self.root.winfo_width())
+        config.set("window", "height", self.root.winfo_height())
         core.force_save()
+        hotkeys.unregister_all_hotkeys()
         self.root.destroy()
 
 
-# ══════════════════════════════════════════════════════════════════════
-#  HOTKEY SETTINGS DIALOG
-# ══════════════════════════════════════════════════════════════════════
+class ShortcutsDialog:
+    """Small, styled reference for the revolver's controls."""
 
-class HotkeySettingsDialog:
-    """Toplevel dialog for viewing and recording new hotkey bindings."""
+    SHORTCUTS = (
+        ("1 – 9, 0", "Select chambers 01 – 10"),
+        ("↑ ↓ or ← →", "Cycle around the barrel"),
+        ("Enter", "Copy the selected round"),
+        ("Ctrl + Enter", "Fire, hide, and paste"),
+        ("Ctrl + Shift + C", "Capture the current clipboard"),
+        ("Ctrl + S", "Save edits in the content panel"),
+        ("Delete", "Eject the selected round"),
+        ("Double-click", "Copy a chamber immediately"),
+    )
 
-    # Human-readable labels for each action
-    ACTION_LABELS = {
-        "show_gui": "Show GUI",
-        "copy_to_board": "Copy to Board",
-        "paste_recent": "Paste Recent",
-        "paste_all": "Paste All",
-        "paste_combo": "Paste Combo",
-        "cycle_forward": "Cycle Forward",
-        "cycle_backward": "Cycle Backward",
-        "quick_paste_1": "Quick Paste 1",
-        "quick_paste_2": "Quick Paste 2",
-        "quick_paste_3": "Quick Paste 3",
-        "quick_paste_4": "Quick Paste 4",
-        "quick_paste_5": "Quick Paste 5",
-    }
-
-    def __init__(self, parent):
+    def __init__(self, parent: tk.Tk):
         self.win = tk.Toplevel(parent)
-        self.win.title("Hotkey Settings")
-        self.win.geometry("480x520")
-        self.win.minsize(400, 400)
+        self.win.title("CopyBoard Shortcuts")
+        self.win.configure(bg=PANEL)
+        self.win.geometry("520x470")
+        self.win.resizable(False, False)
         self.win.transient(parent)
         self.win.grab_set()
+        tk.Label(
+            self.win,
+            text="QUICK-DRAW CONTROLS",
+            bg=PANEL,
+            fg=TEXT,
+            font=(FONT, 18, "bold"),
+        ).pack(anchor=tk.W, padx=28, pady=(28, 4))
+        tk.Label(
+            self.win,
+            text="Keep one hand on the keyboard and one on the work.",
+            bg=PANEL,
+            fg=TEXT_DIM,
+            font=(FONT, 10),
+        ).pack(anchor=tk.W, padx=28, pady=(0, 20))
 
-        self.capturing_for = None
-        self.pending_hotkeys: dict = {}  # action -> new combo
-        self.display_labels: dict = {}   # action -> Label widget
-        self.record_buttons: dict = {}   # action -> Button widget
+        table = tk.Frame(self.win, bg=PANEL_RAISED)
+        table.pack(fill=tk.BOTH, expand=True, padx=28, pady=(0, 18))
+        for shortcut, description in self.SHORTCUTS:
+            row = tk.Frame(table, bg=PANEL_RAISED)
+            row.pack(fill=tk.X, padx=16, pady=7)
+            tk.Label(
+                row,
+                text=shortcut,
+                width=18,
+                anchor=tk.W,
+                bg=PANEL_RAISED,
+                fg=BRASS,
+                font=(MONO, 9, "bold"),
+            ).pack(side=tk.LEFT)
+            tk.Label(
+                row,
+                text=description,
+                anchor=tk.W,
+                bg=PANEL_RAISED,
+                fg=TEXT,
+                font=(FONT, 9),
+            ).pack(side=tk.LEFT)
 
-        # Load current config
-        self.current_hotkeys = config.get_section("hotkeys")
-        self.pending_hotkeys = dict(self.current_hotkeys)
-
-        # ── Build UI ───────────────────────────────────────────────
-        ttk.Label(self.win, text="Hotkey Configuration",
-                  font=("Arial", 14, "bold")).pack(pady=(10, 5))
-        ttk.Label(self.win, text="Click Record, then press your key combination.",
-                  font=("Arial", 9)).pack(pady=(0, 10))
-
-        # Scrollable frame
-        canvas = tk.Canvas(self.win, borderwidth=0, highlightthickness=0)
-        scrollbar = ttk.Scrollbar(self.win, orient="vertical", command=canvas.yview)
-        self.scroll_frame = ttk.Frame(canvas)
-
-        self.scroll_frame.bind(
-            "<Configure>",
-            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
-        )
-        canvas.create_window((0, 0), window=self.scroll_frame, anchor="nw")
-        canvas.configure(yscrollcommand=scrollbar.set)
-
-        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=10)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-
-        for action in self.ACTION_LABELS:
-            self._add_hotkey_row(action)
-
-        # Hidden entry for key capture
-        self._capture_entry = tk.Entry(self.win, width=1)
-        self._capture_entry.place(x=-100, y=-100)  # offscreen
-        self._capture_entry.bind("<KeyPress>", self._on_key_capture)
-
-        # Buttons
-        btn_frame = ttk.Frame(self.win)
-        btn_frame.pack(fill=tk.X, padx=10, pady=10)
-
-        self._status_var = tk.StringVar()
-        ttk.Label(btn_frame, textvariable=self._status_var,
-                  foreground="red").pack(side=tk.LEFT)
-
-        ttk.Button(btn_frame, text="Reset Defaults",
-                   command=self._reset_defaults).pack(side=tk.RIGHT, padx=5)
-        ttk.Button(btn_frame, text="Cancel",
-                   command=self.win.destroy).pack(side=tk.RIGHT, padx=5)
-        ttk.Button(btn_frame, text="Save",
-                   command=self._save).pack(side=tk.RIGHT, padx=5)
-
-    def _add_hotkey_row(self, action):
-        row = ttk.Frame(self.scroll_frame)
-        row.pack(fill=tk.X, pady=2)
-
-        label_text = self.ACTION_LABELS.get(action, action)
-        ttk.Label(row, text=label_text, width=18, anchor=tk.W).pack(side=tk.LEFT, padx=(0, 5))
-
-        combo_lbl = ttk.Label(row, text=self.pending_hotkeys.get(action, "") or "",
-                              width=22, anchor=tk.W, relief=tk.SUNKEN)
-        combo_lbl.pack(side=tk.LEFT, padx=5)
-        self.display_labels[action] = combo_lbl
-
-        btn = ttk.Button(row, text="Record", width=8,
-                         command=lambda a=action: self._start_capture(a))
-        btn.pack(side=tk.LEFT, padx=5)
-        self.record_buttons[action] = btn
-
-    def _start_capture(self, action):
-        self.capturing_for = action
-        self._capture_entry.focus_set()
-        self.record_buttons[action].config(text="Press...")
-        self._status_var.set("")
-
-    def _on_key_capture(self, event):
-        if not self.capturing_for:
-            return
-
-        modifiers = []
-        if event.state & 0x4:
-            modifiers.append("ctrl")
-        if event.state & 0x1:
-            modifiers.append("shift")
-        if event.state & 0x20000:
-            modifiers.append("alt")
-
-        key = event.keysym.lower()
-        # Ignore lone modifier presses
-        if key in ("control_l", "control_r", "shift_l", "shift_r",
-                    "alt_l", "alt_r", "meta_l", "meta_r"):
-            return
-
-        combo = "+".join(modifiers + [key])
-        action = self.capturing_for
-        self.pending_hotkeys[action] = combo
-        self.display_labels[action].config(text=combo)
-        self.record_buttons[action].config(text="Record")
-        self.capturing_for = None
-
-        # Check for system-reserved warning
-        if combo.lower() in SYSTEM_RESERVED:
-            self._status_var.set(f"Warning: {combo} is a system shortcut")
-
-    def _find_conflicts(self) -> list:
-        """Return list of (action1, action2, combo) triples that conflict."""
-        seen: dict = {}  # combo -> action
-        conflicts = []
-        for action, combo in self.pending_hotkeys.items():
-            if not combo:
-                continue
-            if combo in seen:
-                conflicts.append((seen[combo], action, combo))
-            else:
-                seen[combo] = action
-        return conflicts
-
-    def _save(self):
-        conflicts = self._find_conflicts()
-        if conflicts:
-            names = []
-            for a1, a2, combo in conflicts:
-                l1 = self.ACTION_LABELS.get(a1, a1)
-                l2 = self.ACTION_LABELS.get(a2, a2)
-                names.append(f"{l1} & {l2} ({combo})")
-                # Highlight in red
-                self.display_labels[a1].config(foreground="red")
-                self.display_labels[a2].config(foreground="red")
-            self._status_var.set(f"Conflicts: {'; '.join(names)}")
-            return
-
-        # Apply changes
-        old_config = config.get_section("hotkeys")
-        for action, new_combo in self.pending_hotkeys.items():
-            old_combo = old_config.get(action, "")
-            if new_combo != old_combo:
-                hotkeys.apply_hotkey_change(action, old_combo, new_combo)
-
-        self.win.destroy()
-
-    def _reset_defaults(self):
-        config.reset_section("hotkeys")
-        self.pending_hotkeys = config.get_section("hotkeys")
-        for action, lbl in self.display_labels.items():
-            lbl.config(text=self.pending_hotkeys.get(action, ""), foreground="")
-        self._status_var.set("Reset to defaults")
+        tk.Button(
+            self.win,
+            text="GOT IT",
+            command=self.win.destroy,
+            bg=ACCENT,
+            fg=INK,
+            activebackground=ACCENT_HOVER,
+            activeforeground=INK,
+            relief=tk.FLAT,
+            bd=0,
+            padx=22,
+            pady=9,
+            cursor="hand2",
+            font=(MONO, 9, "bold"),
+        ).pack(anchor=tk.E, padx=28, pady=(0, 24))
 
 
-# ══════════════════════════════════════════════════════════════════════
-#  ENTRY POINT
-# ══════════════════════════════════════════════════════════════════════
-
-def main():
+def main() -> None:
     root = tk.Tk()
-    app = CopyboardGUI(root)
+    CopyboardGUI(root)
+    try:
+        hotkeys.setup_default_hotkeys(core)
+    except Exception:
+        # Global key capture is optional; the in-window controls always work.
+        pass
     root.mainloop()
 
 

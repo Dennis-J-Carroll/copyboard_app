@@ -11,6 +11,7 @@ try:
     import keyboard
     KEYBOARD_AVAILABLE = True
 except ImportError:
+    keyboard = None
     KEYBOARD_AVAILABLE = False
 
 # Active hotkeys with their callbacks
@@ -107,7 +108,7 @@ def setup_default_hotkeys(core_module) -> None:
     _action_callbacks["cycle_forward"] = cycle_forward
     _action_callbacks["cycle_backward"] = cycle_backward
 
-    for i in range(1, 6):
+    for i in range(1, 11):
         key = f"quick_paste_{i}"
         idx = i - 1
         _action_callbacks[key] = lambda idx=idx: core_module.paste_from_board(idx)
