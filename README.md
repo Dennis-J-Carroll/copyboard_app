@@ -1,21 +1,17 @@
-# CopyBoard
-
-A multi-clipboard utility for copying and pasting multiple items across all major platforms.
-As you use you computer for anything, wether it be typical research, or just casually. Have you ever found yourself having to switch between pages or tabs to get all of the segments of information you wanted in one place? 
-Here I wanted to create a way that, instead of having one selection pastable from a copied item, the user will have the cchoice of ten items that they have copied. 
-
-This is CopyBoard: 
 <p align="center">
-  <img src="universal_upscale_0_5c1108bf-7f62-4c4e-bc97-268262d24997_0.jpg" alt="CopyBoard App Preview" width="600"/>
+  <img src="docs/media/copyboard-logo.png" alt="CopyBoard" width="480"/>
 </p>
 
+<p align="center">A multi-clipboard utility for copying and pasting multiple items across all major platforms.</p>
 
+Ever had to bounce between tabs or windows just to gather a handful of things you'd copied? CopyBoard fixes that: instead of one item overwriting your clipboard every time, you get a ten-chamber revolver of everything you've recently copied, ready to fire back out whenever you need it.
 
-
-
-
-
-This is still a work and progress and all contributions are welcome.
+<p align="center">
+  <img src="docs/media/mk2-overview.png" alt="CopyBoard MK II — ten-chamber revolver UI" width="800"/>
+</p>
+<p align="center">
+  <img src="docs/media/mk2-chamber-detail.png" alt="CopyBoard MK II — chamber detail view" width="360"/>
+</p>
 
 ## Features
 
