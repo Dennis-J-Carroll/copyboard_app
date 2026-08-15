@@ -4,6 +4,21 @@
 
 <p align="center">A multi-clipboard utility for copying and pasting multiple items across all major platforms.</p>
 
+## Download
+
+Linux desktop releases are available from the
+[GitHub Releases page](https://github.com/Dennis-J-Carroll/copyboard_app/releases):
+
+- **Debian package (`.deb`)** — recommended for Ubuntu, Debian, and Linux Mint.
+  Double-click the download to install CopyBoard in the application menu.
+- **AppImage** — portable release for other x86-64 Linux distributions. Make
+  it executable once, then double-click it to run. Automatic capture and paste
+  still require the host system to provide `xclip` and `xdotool`.
+
+The Linux release currently targets X11. Clipboard history and copy-only
+features remain usable under XWayland, but automatic focus restoration and
+pasting depend on `xdotool` and may be limited in native Wayland sessions.
+
 Ever had to bounce between tabs or windows just to gather a handful of things you'd copied? CopyBoard fixes that: instead of one item overwriting your clipboard every time, you get a ten-chamber revolver of everything you've recently copied, ready to fire back out whenever you need it.
 
 <p align="center">

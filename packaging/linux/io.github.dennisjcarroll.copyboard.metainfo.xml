@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.dennisjcarroll.copyboard</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>CopyBoard</name>
+  <summary>Ten-chamber clipboard history for desktop workflows</summary>
+  <description>
+    <p>
+      CopyBoard keeps the ten most recent text clipboard entries visible in a
+      revolver-inspired desktop interface. Select any chamber to inspect,
+      edit, copy, or paste its contents.
+    </p>
+    <p>
+      A compact always-on-top widget provides quick access while working in
+      other applications. Clipboard history remains local to the computer.
+    </p>
+  </description>
+  <launchable type="desktop-id">copyboard.desktop</launchable>
+  <developer_name>Dennis J. Carroll</developer_name>
+  <url type="homepage">https://github.com/Dennis-J-Carroll/copyboard_app</url>
+  <url type="bugtracker">https://github.com/Dennis-J-Carroll/copyboard_app/issues</url>
+  <content_rating type="oars-1.1" />
+  <releases>
+    <release version="0.5.0" date="2026-08-15">
+      <description>
+        <p>First packaged release of the ten-chamber MK II desktop app.</p>
+      </description>
+    </release>
+  </releases>
+</component>

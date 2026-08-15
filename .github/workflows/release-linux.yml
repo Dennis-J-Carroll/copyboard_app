@@ -1,0 +1,80 @@
+name: Release Linux
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes appstream desktop-file-utils python3-tk x11-utils xclip xdotool xvfb
+          python -m pip install --upgrade pip
+          python -m pip install ".[dev]" pyinstaller
+
+      - name: Verify tag matches project version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          project_version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' pyproject.toml | head -n 1)"
+          test "${GITHUB_REF_NAME#v}" = "$project_version"
+
+      - name: Run Python tests
+        run: pytest -q
+
+      - name: Download AppImage packaging tool
+        run: |
+          curl --fail --location --output "$RUNNER_TEMP/appimagetool-x86_64.AppImage" \
+            https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x "$RUNNER_TEMP/appimagetool-x86_64.AppImage"
+
+      - name: Build Linux release packages
+        env:
+          APPIMAGETOOL: ${{ runner.temp }}/appimagetool-x86_64.AppImage
+        run: ./packaging/build-linux.sh
+
+      - name: Test packaged applications
+        run: ./packaging/test-linux-artifacts.sh
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: CopyBoard-${{ github.ref_name }}-linux
+          path: release-dist/
+          if-no-files-found: error
+
+      - name: Create or refresh draft GitHub release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          assets=(
+            release-dist/CopyBoard_*.deb
+            release-dist/CopyBoard-x86_64.AppImage
+            release-dist/SHA256SUMS
+          )
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "${assets[@]}" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "${assets[@]}" \
+              --draft \
+              --generate-notes \
+              --title "CopyBoard $GITHUB_REF_NAME"
+          fi

@@ -13,10 +13,9 @@ data_files = [
 
 setup(
     name="copyboard-extension",
-    version="0.1.0",
+    version="0.5.0",
     description="A multi-clipboard utility for copying and pasting multiple items",
-    author="Copyboard Developer",
-    author_email="example@example.com",
+    author="Dennis J. Carroll",
     packages=[
         'copyboard_extension',
         'copyboard_extension.browser_extension',
@@ -46,15 +45,12 @@ setup(
         ],
     },
     data_files=data_files,
-    python_requires=">=3.6",
+    python_requires=">=3.9",
     classifiers=[
         "Development Status :: 3 - Alpha",
         "Intended Audience :: End Users/Desktop",
         "License :: OSI Approved :: MIT License",
         "Programming Language :: Python :: 3",
-        "Programming Language :: Python :: 3.6",
-        "Programming Language :: Python :: 3.7",
-        "Programming Language :: Python :: 3.8",
         "Programming Language :: Python :: 3.9",
         "Topic :: Utilities",
     ],

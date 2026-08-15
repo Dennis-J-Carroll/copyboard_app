@@ -5,8 +5,9 @@ from setuptools import find_packages, setup
 
 setup(
     name="copyboard-extension",
-    version="0.2.0",
+    version="0.5.0",
     description="A ten-chamber clipboard revolver for desktop workflows",
+    license="MIT",
     packages=find_packages(include=("copyboard_extension", "copyboard_extension.*")),
     include_package_data=True,
     package_data={

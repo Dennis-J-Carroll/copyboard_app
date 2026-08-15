@@ -1,0 +1,13 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=CopyBoard
+GenericName=Clipboard Manager
+Comment=Ten-chamber clipboard history
+Exec=copyboard-gui
+Icon=copyboard
+Terminal=false
+Categories=Utility;
+Keywords=clipboard;copy;paste;history;
+StartupNotify=true
+StartupWMClass=CopyBoard

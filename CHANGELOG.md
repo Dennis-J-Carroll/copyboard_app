@@ -1,5 +1,24 @@
 # Copyboard Changelog
 
+## Version 0.5.0 (2026-08-15)
+
+### Added
+- Ten-chamber MK II desktop interface with automatic clipboard capture
+- Compact quick-paste widget with click and drag gestures
+- Purpose-built CopyBoard application icon and desktop launcher
+- Flutter mobile foundation for Android and iOS
+- Reproducible Linux packaging for AppImage and Debian packages
+- Tag-driven GitHub Actions workflow that prepares draft releases
+
+### Fixed
+- Replaced launchers that referenced obsolete machine-specific paths
+- Prevented clean shutdowns and test imports from overwriting clipboard history
+- Corrected Linux fallback paste escaping
+
+### Changed
+- Standardized desktop package metadata and versioning on 0.5.0
+- Declared the project license in a distributable MIT license file
+
 ## Version 0.4.0 (2025-03-04)
 
 ### Added
