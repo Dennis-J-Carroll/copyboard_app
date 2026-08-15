@@ -11,6 +11,7 @@ setup(
     include_package_data=True,
     package_data={
         "copyboard_extension": [
+            "assets/*.png",
             "snippets/*.json",
             "browser_extension/*.html",
             "browser_extension/*.js",

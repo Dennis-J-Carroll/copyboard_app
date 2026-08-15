@@ -21,7 +21,9 @@ DEFAULT_CONFIG = {
         "height": 500,
         "always_on_top": True,
         "mini_mode": False,
-        "opacity": 0.95
+        "opacity": 0.95,
+        "widget_x": 80,
+        "widget_y": 80
     },
     "hotkeys": {
         "show_gui": "ctrl+alt+c",

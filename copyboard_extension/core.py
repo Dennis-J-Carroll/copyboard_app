@@ -360,6 +360,17 @@ def quick_copy_paste(content: str) -> bool:
     paste_helper.paste_current_clipboard()
     return True
 
-# Make sure to save any pending changes when the module exits
+def _save_pending_board() -> None:
+    """Persist shutdown changes without rewriting an untouched board.
+
+    This guard matters for import-only processes (including the test suite):
+    forcing a save there can replace the user's on-disk history with unrelated
+    in-memory state.
+    """
+    if _board_modified:
+        _save_board(force=True)
+
+
+# Make sure genuinely pending changes are saved when the module exits.
 import atexit
-atexit.register(lambda: _save_board(force=True))
+atexit.register(_save_pending_board)

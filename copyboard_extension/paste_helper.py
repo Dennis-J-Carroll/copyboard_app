@@ -10,10 +10,83 @@ import subprocess
 import platform
 import time
 import threading
+from dataclasses import dataclass
 from typing import Optional
 
 # Platform detection
 PLATFORM = platform.system().lower()
+
+
+@dataclass(frozen=True)
+class FocusTarget:
+    """Opaque handle for the window that should receive a quick paste."""
+
+    platform: str
+    token: int
+
+
+def capture_active_window() -> Optional[FocusTarget]:
+    """Capture the foreground window without changing focus."""
+    system = get_platform()
+    try:
+        if system == "windows":
+            import ctypes
+
+            handle = int(ctypes.windll.user32.GetForegroundWindow())
+            return FocusTarget(system, handle) if handle else None
+        if system == "macos":
+            result = subprocess.run(
+                [
+                    "osascript",
+                    "-e",
+                    'tell application "System Events" to get unix id of first process whose frontmost is true',
+                ],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            return FocusTarget(system, int(result.stdout.strip()))
+
+        result = subprocess.run(
+            ["xdotool", "getactivewindow"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return FocusTarget(system, int(result.stdout.strip()))
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+
+
+def restore_active_window(target: Optional[FocusTarget]) -> bool:
+    """Return focus to a window captured before the widget was used."""
+    if target is None or target.platform != get_platform():
+        return False
+    try:
+        if target.platform == "windows":
+            import ctypes
+
+            return bool(ctypes.windll.user32.SetForegroundWindow(target.token))
+        if target.platform == "macos":
+            subprocess.run(
+                [
+                    "osascript",
+                    "-e",
+                    (
+                        'tell application "System Events" to set frontmost of '
+                        f"first process whose unix id is {target.token} to true"
+                    ),
+                ],
+                check=True,
+            )
+            return True
+
+        subprocess.run(
+            ["xdotool", "windowactivate", "--sync", str(target.token)], check=True
+        )
+        return True
+    except (OSError, subprocess.SubprocessError):
+        return False
 
 def get_platform():
     """Detect the current platform"""
@@ -151,7 +224,7 @@ def _paste_linux() -> None:
         try:
             # Try alternative method using xvkbd
             subprocess.run(['which', 'xvkbd'], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            subprocess.run(['xvkbd', '-text', '\Cv'], check=False)
+            subprocess.run(['xvkbd', '-text', r'\Cv'], check=False)
         except (subprocess.SubprocessError, FileNotFoundError):
             pass
 

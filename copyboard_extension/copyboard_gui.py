@@ -7,6 +7,7 @@ clipboard entries arrive in chamber 1 and older entries rotate clockwise.
 
 import math
 import os
+import queue
 import re
 import sys
 import tkinter as tk
@@ -23,6 +24,7 @@ if parent_dir not in sys.path:
 try:
     from . import core, hotkeys, paste_helper
     from .config_manager import config
+    from .widget_mode import QuickPasteWidget
 except ImportError as exc:
     print(f"Error importing CopyBoard modules: {exc}")
     raise
@@ -79,6 +81,8 @@ class CopyboardGUI:
         self.root = root
         self.root.title("CopyBoard — 10 Chamber Clipboard")
         self.root.configure(bg=INK)
+        self._app_icon: Optional[tk.PhotoImage] = None
+        self._set_app_icon()
         self.root.geometry(self._initial_geometry())
         self.root.minsize(940, 640)
 
@@ -92,6 +96,9 @@ class CopyboardGUI:
         self._poll_job: Optional[str] = None
         self._status_job: Optional[str] = None
         self._closing = False
+        self._widget: Optional[QuickPasteWidget] = None
+        self._widget_target = None
+        self._ui_actions: queue.SimpleQueue[str] = queue.SimpleQueue()
 
         self.auto_capture_var = tk.BooleanVar(
             value=config.get("board", "auto_capture", True)
@@ -114,7 +121,17 @@ class CopyboardGUI:
         self._apply_always_on_top()
         self.refresh()
         self._schedule_clipboard_poll()
+        self._schedule_ui_action_poll()
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
+
+    def _set_app_icon(self) -> None:
+        """Use CopyBoard's bundled icon without making startup depend on it."""
+        icon_path = os.path.join(current_dir, "assets", "copyboard-icon.png")
+        try:
+            self._app_icon = tk.PhotoImage(file=icon_path)
+            self.root.iconphoto(True, self._app_icon)
+        except (OSError, tk.TclError):
+            self._app_icon = None
 
     def _initial_geometry(self) -> str:
         width = max(1040, config.get("window", "width", 1040))
@@ -166,6 +183,9 @@ class CopyboardGUI:
         ).pack(side=tk.LEFT, padx=(0, 8), pady=12)
         self._make_button(
             actions, "SHORTCUTS", self.open_shortcuts, variant="quiet"
+        ).pack(side=tk.LEFT, padx=(0, 12), pady=12)
+        self._make_button(
+            actions, "WIDGET MODE", self.open_widget, variant="quiet"
         ).pack(side=tk.LEFT, padx=(0, 12), pady=12)
 
         tk.Checkbutton(
@@ -674,6 +694,101 @@ class CopyboardGUI:
         self.root.iconify()
         self.root.after(220, paste_helper.paste_current_clipboard)
 
+    # ------------------------------------------------------------------
+    # Compact quick-paste widget
+    # ------------------------------------------------------------------
+    def request_widget(self) -> None:
+        """Thread-safe entry point used by the global shortcut callback."""
+        self._ui_actions.put("widget")
+
+    def _schedule_ui_action_poll(self) -> None:
+        if not self._closing:
+            self.root.after(90, self._poll_ui_actions)
+
+    def _poll_ui_actions(self) -> None:
+        if self._closing:
+            return
+        try:
+            while True:
+                action = self._ui_actions.get_nowait()
+                if action == "widget":
+                    self.open_widget()
+        except queue.Empty:
+            pass
+
+        if (
+            self._widget is not None
+            and self._widget.is_visible()
+            and self.root.focus_displayof() is None
+        ):
+            target = paste_helper.capture_active_window()
+            if target is not None:
+                self._widget_target = target
+        self._schedule_ui_action_poll()
+
+    def open_widget(self) -> None:
+        """Collapse the editor into the ten-round quick-paste overlay."""
+        if self._widget is not None and self._widget.is_visible():
+            self._restore_from_widget()
+            return
+
+        target = paste_helper.capture_active_window()
+        if target is not None:
+            self._widget_target = target
+
+        if self._widget is None:
+            self._widget = QuickPasteWidget(
+                parent=self.root,
+                get_items=core.get_board,
+                describe_item=self._describe_widget_item,
+                on_fire=self._fire_from_widget,
+                on_restore=self._restore_from_widget,
+                initial_position=(
+                    config.get("window", "widget_x", 80),
+                    config.get("window", "widget_y", 80),
+                ),
+                on_move=self._save_widget_position,
+            )
+        self.root.withdraw()
+        self._widget.show()
+
+    def _describe_widget_item(self, content: str) -> Tuple[str, str, str]:
+        kind, mark = classify_clip(content)
+        return kind, mark, compact_preview(content, limit=35)
+
+    def _save_widget_position(self, x: int, y: int) -> None:
+        config.set("window", "widget_x", x)
+        config.set("window", "widget_y", y)
+
+    def _restore_from_widget(self) -> None:
+        if self._widget is not None:
+            self._widget.hide()
+        self.root.deiconify()
+        self.root.lift()
+        self.root.focus_force()
+
+    def _fire_from_widget(self, index: int) -> None:
+        content = core.get_board_item(index)
+        if content is None:
+            return
+        try:
+            pyperclip.copy(content)
+        except pyperclip.PyperclipException:
+            return
+
+        self.selected_index = index
+        self._last_clipboard = content
+        self._set_status(f"Fired chamber {index + 1:02d} from widget")
+        if self._widget is not None:
+            self._widget.hide()
+        paste_helper.restore_active_window(self._widget_target)
+        self.root.after(180, self._complete_widget_paste)
+
+    def _complete_widget_paste(self) -> None:
+        paste_helper.paste_current_clipboard()
+        if not self._closing and self._widget is not None:
+            self.root.after(280, self._widget.show)
+
     def save_editor(self) -> None:
         content = self.editor.get("1.0", "end-1c")
         existing = core.get_board_item(self.selected_index)
@@ -912,10 +1027,13 @@ class ShortcutsDialog:
 
 
 def main() -> None:
-    root = tk.Tk()
-    CopyboardGUI(root)
+    root = tk.Tk(className="CopyBoard")
+    gui = CopyboardGUI(root)
     try:
         hotkeys.setup_default_hotkeys(core)
+        hotkeys.register_hotkey(
+            config.get("hotkeys", "show_gui", "ctrl+alt+c"), gui.request_widget
+        )
     except Exception:
         # Global key capture is optional; the in-window controls always work.
         pass

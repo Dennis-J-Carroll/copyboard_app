@@ -1,4 +1,38 @@
-#!/bin/bash
-# Copyboard GUI launcher
+#!/usr/bin/env bash
+set -u
 
-python3 /home/dennisjcarroll/CascadeProjects/windsurf-project/copyboard_extension/copyboard_gui.py
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)"
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/copyboard"
+LOG_FILE="$STATE_DIR/launcher.log"
+
+show_error() {
+    local message="$1"
+    if command -v zenity >/dev/null 2>&1; then
+        zenity --error --title="CopyBoard" --text="$message"
+    elif command -v kdialog >/dev/null 2>&1; then
+        kdialog --error "$message" --title "CopyBoard"
+    elif command -v xmessage >/dev/null 2>&1; then
+        xmessage -center "CopyBoard: $message"
+    else
+        printf 'CopyBoard: %s\n' "$message" >&2
+    fi
+}
+
+PYTHON_BIN=""
+for candidate in "$PROJECT_ROOT/.venv/bin/python" /usr/bin/python3 python3; do
+    if command -v "$candidate" >/dev/null 2>&1 \
+        && "$candidate" -c 'import tkinter, pyperclip' >/dev/null 2>&1; then
+        PYTHON_BIN="$candidate"
+        break
+    fi
+done
+
+if [[ -z "$PYTHON_BIN" ]]; then
+    show_error "Python 3 with Tk and pyperclip is required. Install python3-tk and pyperclip, then try again."
+    exit 1
+fi
+
+mkdir -p "$STATE_DIR"
+cd "$PROJECT_ROOT" || exit 1
+exec "$PYTHON_BIN" -m copyboard_extension.copyboard_gui >>"$LOG_FILE" 2>&1

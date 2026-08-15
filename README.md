@@ -40,6 +40,12 @@ The app auto-captures new text copied anywhere on the desktop. Click a chamber
 to inspect or edit it, **Copy Only** to place it back on the clipboard, or
 **Fire & Hide** to minimise CopyBoard and paste into the previous app.
 
+Choose **Widget Mode** (or press `Ctrl+Alt+C`) for a compact always-on-top
+revolver. Hover to preview a round, click it to quick-paste, or hold and drag
+before releasing for the same quick-fire gesture. The widget briefly hides,
+returns focus to the previous app, pastes, and then reappears. Drag its header
+to reposition it; right-click or press Escape to return to the full editor.
+
 Keyboard controls:
 
 - `1`–`9` and `0`: select chambers 01–10
@@ -48,6 +54,16 @@ Keyboard controls:
 - `Ctrl+Enter`: fire, hide, and paste
 - `Ctrl+Shift+C`: capture the current clipboard
 - `Delete`: eject the selected round
+
+## Mobile direction
+
+The maintained phone client is `copyboard_mobile_flutter`. It uses the same
+ten-chamber revolver, explicit clipboard capture (required by current mobile
+privacy rules), and native cross-app text dragging. Direct insertion into the
+active field will use an iOS keyboard extension and an Android input method;
+home-screen widgets are a secondary quick-access surface. See
+[`docs/CROSS_PLATFORM_QUICK_PASTE.md`](docs/CROSS_PLATFORM_QUICK_PASTE.md) for
+the platform methodology and delivery sequence.
 
 On Linux, automatic paste requires `xdotool` on X11. Copy-only and clipboard
 history remain available without it.

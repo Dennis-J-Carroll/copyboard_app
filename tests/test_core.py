@@ -30,3 +30,29 @@ class TestCoreRoundTrip:
         isolated_board["add"]("clear-me")
         isolated_board["clear"]()
         assert isolated_board["size"]() == 0
+
+
+class TestShutdownPersistence:
+    """Shutdown must not rewrite the user's board when nothing changed."""
+
+    def test_clean_board_is_not_force_saved(self, monkeypatch):
+        save_calls = []
+        monkeypatch.setattr(core, "_board_modified", False)
+        monkeypatch.setattr(
+            core, "_save_board", lambda force=False: save_calls.append(force)
+        )
+
+        core._save_pending_board()
+
+        assert save_calls == []
+
+    def test_dirty_board_is_force_saved(self, monkeypatch):
+        save_calls = []
+        monkeypatch.setattr(core, "_board_modified", True)
+        monkeypatch.setattr(
+            core, "_save_board", lambda force=False: save_calls.append(force)
+        )
+
+        core._save_pending_board()
+
+        assert save_calls == [True]
