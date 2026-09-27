@@ -23,7 +23,12 @@ DEFAULT_CONFIG = {
         "mini_mode": False,
         "opacity": 0.95,
         "widget_x": 80,
-        "widget_y": 80
+        "widget_y": 80,
+        # After a fire the widget stays hidden ("let go and it's gone") unless
+        # this is true or no global shortcut exists to bring it back.
+        "widget_reopen_after_fire": False,
+        # Open the plate under the mouse pointer instead of its saved spot.
+        "widget_at_pointer": True
     },
     "hotkeys": {
         "show_gui": "ctrl+alt+c",
@@ -42,9 +47,16 @@ DEFAULT_CONFIG = {
         "quick_paste_8": "ctrl+alt+8",
         "quick_paste_9": "ctrl+alt+9",
         "quick_paste_10": "ctrl+alt+0",
+        "quick_paste_11": "ctrl+alt+shift+1",
+        "quick_paste_12": "ctrl+alt+shift+2",
+        "quick_paste_13": "ctrl+alt+shift+3",
+        "quick_paste_14": "ctrl+alt+shift+4",
+        "quick_paste_15": "ctrl+alt+shift+5",
+        "quick_paste_16": "ctrl+alt+shift+6",
         "paste_combo": "ctrl+alt+b"
     },
     "board": {
+        # Chambers in the cylinder: 10–16.  Existing installs keep 10.
         "max_items": 10,
         "auto_capture": True,
         "show_previews": True,

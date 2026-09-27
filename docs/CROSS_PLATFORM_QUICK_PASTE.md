@@ -1,7 +1,8 @@
 # Cross-platform quick-paste architecture
 
-CopyBoard uses one ten-round mental model but different operating-system
-surfaces. A floating desktop window, a phone home-screen widget, and a phone
+CopyBoard uses one revolver mental model — a cylinder of 10–16 numbered
+chambers, configurable on the desktop and fixed at ten in the current mobile
+client — but different operating-system surfaces. A floating desktop window, a phone home-screen widget, and a phone
 keyboard do not receive the same privileges, so treating them as one feature
 would produce unreliable or store-ineligible behavior.
 
@@ -69,7 +70,11 @@ writer without changing the extension contract.
 
 ## Delivery sequence
 
-1. Ship and test the desktop quick-paste overlay.
+1. Ship and test the desktop quick-paste overlay. *(Done: the overlay adapts
+   to 10–16 chambers, aims with the wheel or keys, and fires by chamber number
+   or direct shortcut. The Flutter `BoardStore.chamberCount` still reads 10;
+   adopting the desktop's configurable count is the next mobile step and
+   should keep the touch targets at 52–76 px.)*
 2. Finish the Flutter project scaffolding for Android and iOS, then validate
    the revolver and native cross-app text drag on devices.
 3. Add the shared, versioned board snapshot and migration from the current

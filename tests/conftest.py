@@ -142,11 +142,13 @@ def mock_keyboard(monkeypatch):
     hotkeys._action_callbacks.clear()
 
     registered = {}
+    registered_kwargs = {}
 
     class FakeKeyboard:
         @staticmethod
         def add_hotkey(key, callback, **kwargs):
             registered[key] = callback
+            registered_kwargs[key] = dict(kwargs)
 
         @staticmethod
         def remove_hotkey(key):
@@ -166,4 +168,8 @@ def mock_keyboard(monkeypatch):
     monkeypatch.setattr(hotkeys, "KEYBOARD_AVAILABLE", True)
     monkeypatch.setattr(hotkeys, "keyboard", fake_kb)
 
-    return {"registered": registered, "keyboard": fake_kb}
+    return {
+        "registered": registered,
+        "registered_kwargs": registered_kwargs,
+        "keyboard": fake_kb,
+    }
