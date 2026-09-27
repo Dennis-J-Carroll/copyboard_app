@@ -19,88 +19,115 @@ The Linux release currently targets X11. Clipboard history and copy-only
 features remain usable under XWayland, but automatic focus restoration and
 pasting depend on `xdotool` and may be limited in native Wayland sessions.
 
-Ever had to bounce between tabs or windows just to gather a handful of things you'd copied? CopyBoard fixes that: instead of one item overwriting your clipboard every time, you get a revolver of 10–16 chambers holding everything you've recently copied, ready to fire back out whenever you need it.
+Ever had to bounce between tabs or windows just to gather a handful of things
+you'd copied? CopyBoard fixes that: instead of one item overwriting your
+clipboard every time, you get a revolver of 10–16 chambers holding everything
+you've recently copied, ready to fire back out whenever you need it.
 
 <p align="center">
-  <img src="docs/media/mk2-overview.png" alt="CopyBoard MK II — ten-chamber revolver UI" width="800"/>
+  <img src="docs/media/quick-paste-plate.png" alt="CopyBoard quick-paste plate — a brushed-steel cylinder with COPY and PASTE tabs" width="420"/>
 </p>
 <p align="center">
-  <img src="docs/media/mk2-chamber-detail.png" alt="CopyBoard MK II — chamber detail view" width="360"/>
+  <img src="docs/media/mk2-sixteen-chambers.png" alt="CopyBoard MK II editor with a sixteen-chamber cylinder" width="800"/>
 </p>
 
 ## Features
 
-- Store multiple clipboard items
-- Paste any item from history with keyboard shortcuts
-- Combine multiple clipboard items
-- System-wide hotkeys
-- File manager integration
-- Browser extension
+- A cylinder of 10–16 numbered chambers; every new copy lands in chamber 01
+- Fire any chamber into the app you came from with one shortcut, one click,
+  or one hold-and-release, without the cylinder ever changing
+- A compact quick-paste plate that opens under the pointer and gets out of the
+  way the moment you let go
+- Direct global shortcuts for every chamber, all editable, with conflict status
+- Deliberate edit, eject, resize, and clear — nothing is deleted by pasting
+- Combine chambers, file-manager integration, browser extension
+- Local and offline; history lives in a plain JSON file you can read or delete
 - Cross-platform (Linux, macOS, Windows)
 
 ## Run the desktop app
-
-CopyBoard opens as a clipboard revolver with 10 chambers by default; the
-**CHAMBERS** control in the header sets anything from 10 to 16. Each new copy
-loads into chamber 01 and rotates older rounds clockwise; the oldest round is
-evicted only when every chamber is full. Firing a chamber never moves, copies,
-or ejects it — the cylinder only changes when you copy something new or
-deliberately edit, eject, resize, or clear it (shrinking the cylinder asks
-first and ejects only the oldest rounds).
 
 ```bash
 # From a clone of this repository
 python3 -m venv .venv
 source .venv/bin/activate
-pip install .
+pip install .            # add '.[hotkeys]' for global shortcuts
 copyboard-gui
 ```
 
-The app auto-captures new text copied anywhere on the desktop. Click a chamber
-to inspect or edit it, **Copy Only** to place it back on the clipboard, or
-**Fire & Hide** to minimise CopyBoard and paste into the previous app.
+### The cylinder
 
-Choose **Widget Mode** (or press `Ctrl+Alt+C`) for the compact quick-paste
-plate: a brushed-steel squircle with a blue ring, dark recessed chambers that
-adapt to the chamber count, and **COPY** / **PASTE** tabs cut into the rim.
-The plate is built at startup and opens under the mouse pointer (set
-`window.widget_at_pointer` to `false` to use its saved position instead), so
-the hand never travels. Hover to preview a round, click it to quick-paste, or
-hold, drag, and let go for the same quick-fire gesture. When you let go the
-plate hides, focus returns to the previous app, and the round is pasted there;
-the plate stays out of the way until `Ctrl+Alt+C` brings it back. Escape (or
-pressing the shortcut again) dismisses the plate the same way. (If no global shortcut is available the
-plate reappears after pasting so the app can always be reached; set
-`window.widget_reopen_after_fire` to `true` to always get that behaviour.) If
-focus cannot be returned (for example without `xdotool` on Linux) the round
-stays on the clipboard and the plate says so instead of pasting into the wrong
-window. Drag bare steel to reposition the plate; `↗` or right-click return to
-the full editor.
+CopyBoard opens as a clipboard revolver with 10 chambers by default; the
+**CHAMBERS** control in the header sets anything from 10 to 16. Each new copy
+loads into chamber 01 and rotates older rounds clockwise; the oldest round is
+evicted only when every chamber is full. Firing a chamber never moves, copies,
+or ejects it. The cylinder only changes when you copy something new or
+deliberately edit, eject, resize, or clear it; shrinking the cylinder asks
+first and ejects only the oldest rounds.
 
-Widget controls:
+The editor auto-captures new text copied anywhere on the desktop (pause it
+with **AUTO-CAPTURE**; the footer always shows whether capture is armed).
+Click a chamber to inspect or edit it, **COPY ONLY** to place it back on the
+clipboard, or **FIRE & HIDE** to hide CopyBoard, return focus to the previous
+app, and paste there.
 
-- **COPY** tab: load the current clipboard into chamber 01
-- **PASTE** tab, `Enter`, `Space`, or a click on a chamber: fire the aimed round
-- Mouse wheel (only while the pointer is over the plate) or `↑`/`↓`: aim at a
-  loaded round without firing it
-- `1`–`9`, `0`, or two quick digits (`1` then `4` = chamber 14): aim by number
-- `Delete` twice: eject the aimed round (the first press only arms it)
-- `Esc`: dismiss the plate (it comes back with `Ctrl+Alt+C`)
-- Right-click or `↗`: back to the full editor
+### The quick-paste plate
 
-Editor keyboard controls:
+**WIDGET MODE** (or `Ctrl+Alt+C`) opens the compact plate: a brushed-steel
+squircle with a blue ring, dark recessed chambers, a hub showing the loaded
+count, and **COPY** / **PASTE** tabs cut into the rim. It is built at startup
+and opens with its hub under the mouse pointer, so the hand never travels.
 
-- `1`–`9` and `0`: select chambers 01–10; two quick digits reach 11–16
-- Arrow keys: rotate the selected chamber
-- `Enter`: copy the selected round
-- `Ctrl+Enter`: fire, hide, and paste into the previously focused app
-- `Ctrl+Shift+C`: capture the current clipboard
-- `Delete`: eject the selected round
+The fast path is one gesture: hold a chamber, drag a little, let go. The plate
+hides, focus returns to the app you came from, the round is pasted, and the
+plate stays out of the way until you call it again. A plain click or the
+**PASTE** tab does the same for the aimed chamber.
+
+If focus cannot be returned (for example without `xdotool` on Linux) the round
+stays on the clipboard and the plate says so, rather than pasting into the
+wrong window. If no global shortcut is registered the plate reappears after a
+paste so the app can always be reached.
+
+| Plate control | Action |
+| --- | --- |
+| Hover, mouse wheel (pointer over the plate), `↑` `↓` | Aim at a round; never fires |
+| `1`–`9`, `0`, or two quick digits (`1` then `4` = 14) | Aim by chamber number |
+| Click a chamber, **PASTE** tab, `Enter`, `Space` | Fire the aimed round |
+| Hold, drag, release | Fire and hide in one motion |
+| **COPY** tab | Load the current clipboard into chamber 01 |
+| `Delete` twice | Eject the aimed round (first press only arms it) |
+| Drag bare steel | Move the plate |
+| `Esc` or `Ctrl+Alt+C` | Dismiss the plate |
+| Right-click or `↗` | Back to the full editor |
+
+| Editor control | Action |
+| --- | --- |
+| `1`–`9`, `0`; two quick digits for 11–16 | Select a chamber |
+| Arrow keys | Rotate the selection |
+| `Enter` | Copy the selected round |
+| `Ctrl+Enter` | Fire, hide, and paste into the previous app |
+| `Ctrl+Shift+C` | Capture the current clipboard |
+| `Ctrl+S` | Save an edit |
+| `Delete` | Eject the selected round |
+| Double-click | Copy a chamber immediately |
+
+### Configuration
+
+Settings live in `~/.config/copyboard/config.json`; the history itself is
+`board.json` in the same folder, a plain JSON list of strings. Everything is
+local and offline.
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `board.max_items` | `10` | Chambers in the cylinder, 10–16. Older values outside that range are clamped once on launch. |
+| `board.auto_capture` | `true` | Load new external copies into chamber 01 |
+| `window.widget_at_pointer` | `true` | Open the plate under the mouse pointer instead of its saved spot |
+| `window.widget_reopen_after_fire` | `false` | Bring the plate back after every paste (always true when no shortcut can reopen it) |
+| `hotkeys.*` | see below | Global shortcut combos, editable from **SHORTCUTS** |
 
 ## Mobile direction
 
 The maintained phone client is `copyboard_mobile_flutter`. It uses the same
-ten-chamber revolver, explicit clipboard capture (required by current mobile
+revolver model (currently fixed at ten chambers), explicit clipboard capture (required by current mobile
 privacy rules), and native cross-app text dragging. Direct insertion into the
 active field will use an iOS keyboard extension and an Android input method;
 home-screen widgets are a secondary quick-access surface. See
@@ -217,7 +244,10 @@ Then load the unpacked extension from the `copyboard_extension/browser_extension
 
 ## How It Works
 
-Copyboard uses a simple list-based storage system (`~/.config/copyboard/board.json`, a plain JSON list of strings) to keep track of copied items. When you copy something, it's stored at the top of the list. When you paste, you can choose any item from the list. The chamber count lives in `config.json` under `board.max_items`; values outside 10–16 from older configs are clamped into that range on the next launch.
+Copyboard keeps the history as a plain JSON list of strings in
+`~/.config/copyboard/board.json`. A new copy goes to the front of the list, so
+chamber 01 is list index 0. The CLI and Python API use those zero-based
+indexes; the desktop app shows the one-based chamber labels 01–16.
 
 The extension can run in multiple modes:
 1. **GUI mode** - A graphical interface for easy interaction
