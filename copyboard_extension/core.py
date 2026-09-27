@@ -6,13 +6,26 @@ import subprocess
 import sys
 import os
 import json
+import threading
 import time
 from typing import List, Optional, Dict, Union, Tuple
 from . import paste_helper
+from .chambers import (  # chamber_* are re-exported as part of the board API
+    DEFAULT_CHAMBERS,
+    chamber_index,
+    chamber_label,
+    chamber_number,
+    is_chamber_index,
+    normalize_chamber_count,
+)
 from .config_manager import config
 
-# Maximum items to store in the clipboard history (read from config)
-MAX_BOARD_SIZE = config.get("board", "max_items", 10)
+# Maximum items to store in the clipboard history (read from config).
+# The revolver supports 10–16 chambers; anything else in a legacy config is
+# clamped into that range so every surface agrees on one capacity.
+MAX_BOARD_SIZE = normalize_chamber_count(
+    config.get("board", "max_items", DEFAULT_CHAMBERS)
+)
 
 # File to store the clipboard board
 USER_HOME = os.path.expanduser("~")
@@ -30,6 +43,13 @@ _last_saved_time = 0
 _changes_since_save = 0
 _board_loaded = False
 
+# Clipboard writes made by CopyBoard itself.  The GUI's polling loop consults
+# this so that firing a chamber is never mistaken for a fresh external copy
+# (which would wrongly move the fired item back into chamber 01).
+_APP_WRITE_TTL = 6.0  # seconds a pending self-write stays recognisable
+_app_clipboard_writes: Dict[str, float] = {}
+_app_clipboard_lock = threading.Lock()
+
 # Ensure the config directory exists
 if not os.path.exists(BOARD_DIR):
     os.makedirs(BOARD_DIR)
@@ -42,7 +62,13 @@ def _load_board(force: bool = False) -> List[str]:
         if os.path.exists(BOARD_FILE):
             try:
                 with open(BOARD_FILE, 'r') as f:
-                    _board = json.load(f)
+                    loaded = json.load(f)
+                # board.json is a plain JSON list of strings.  Tolerate a
+                # damaged file by keeping only the entries we understand.
+                if isinstance(loaded, list):
+                    _board = [item for item in loaded if isinstance(item, str)]
+                else:
+                    _board = []
                 _board_loaded = True
             except Exception as e:
                 print(f"Error loading clipboard board: {e}")
@@ -87,6 +113,55 @@ def _mark_modified():
 
 # Load the board at module import time (but only once)
 _load_board()
+
+
+# ---------------------------------------------------------------------------
+# Clipboard boundary
+# ---------------------------------------------------------------------------
+def set_clipboard_text(text: str) -> None:
+    """Write ``text`` to the system clipboard on behalf of CopyBoard.
+
+    The write is recorded *before* it reaches the clipboard so a concurrent
+    poll can never observe the new text without also finding it flagged as
+    app-originated.  If the clipboard rejects the write the record is removed.
+    """
+    now = time.time()
+    with _app_clipboard_lock:
+        _purge_expired_app_writes(now)
+        _app_clipboard_writes[text] = now
+    try:
+        pyperclip.copy(text)
+    except Exception:
+        with _app_clipboard_lock:
+            _app_clipboard_writes.pop(text, None)
+        raise
+
+
+def is_app_clipboard_write(text: str) -> bool:
+    """Report (and consume) whether ``text`` is a clipboard write we made.
+
+    Intended for the clipboard poller: when it sees new clipboard content it
+    asks this question first, and only captures the text when the answer is
+    False.  Each recorded write answers True once, and unanswered records
+    expire after a few seconds so a later genuine copy of identical text is
+    still captured.
+    """
+    with _app_clipboard_lock:
+        _purge_expired_app_writes(time.time())
+        return _app_clipboard_writes.pop(text, None) is not None
+
+
+def _purge_expired_app_writes(now: float) -> None:
+    stale = [key for key, at in _app_clipboard_writes.items() if now - at > _APP_WRITE_TTL]
+    for key in stale:
+        del _app_clipboard_writes[key]
+
+
+def _reset_app_clipboard_writes() -> None:
+    """Test helper: forget every recorded self-write."""
+    with _app_clipboard_lock:
+        _app_clipboard_writes.clear()
+
 
 def copy_to_board(content: Optional[str] = None) -> str:
     """
@@ -139,8 +214,9 @@ def paste_from_board(index: int = 0, auto_paste: bool = True) -> bool:
     if not _board or index < 0 or index >= len(_board):
         return False
         
-    # Fast-path: Copy the selected item to the clipboard
-    pyperclip.copy(_board[index])
+    # Fast-path: copy the selected item to the clipboard.  This is a read of
+    # the board; the item stays exactly where it is.
+    set_clipboard_text(_board[index])
     
     # Attempt to paste it automatically if requested
     if auto_paste:
@@ -162,7 +238,7 @@ def paste_all(auto_paste: bool = True) -> bool:
         return False
         
     all_content = '\n'.join(_board)
-    pyperclip.copy(all_content)
+    set_clipboard_text(all_content)
     
     if auto_paste:
         paste_helper.paste_current_clipboard()
@@ -193,7 +269,7 @@ def paste_combination(indices: List[int], auto_paste: bool = True) -> bool:
     
     # Combine and paste
     combined = ''.join(selected_items)
-    pyperclip.copy(combined)
+    set_clipboard_text(combined)
     
     if auto_paste:
         paste_helper.paste_current_clipboard()
@@ -356,9 +432,59 @@ def quick_copy_paste(content: str) -> bool:
     Returns:
         True if successful
     """
-    pyperclip.copy(content)
+    set_clipboard_text(content)
     paste_helper.paste_current_clipboard()
     return True
+
+
+# ---------------------------------------------------------------------------
+# Revolver capacity (the user-facing 10–16 chamber contract)
+# ---------------------------------------------------------------------------
+def get_chamber_count() -> int:
+    """Return the number of chambers in the cylinder (10–16)."""
+    return MAX_BOARD_SIZE
+
+
+def set_chamber_count(count: object, persist: bool = True) -> int:
+    """Resize the cylinder to ``count`` chambers and return the applied value.
+
+    Invalid or out-of-range values are normalised (clamped into 10–16, or
+    the default for non-numeric input) instead of raising.  When the cylinder
+    shrinks the *oldest* rounds are ejected so the newest ones stay in their
+    low-numbered chambers; growing never changes existing items.  The value is
+    written to ``config.json`` so the editor, widget, hotkeys, and CLI all
+    read the same capacity next time.
+    """
+    applied = normalize_chamber_count(count)
+    set_max_board_size(applied)
+    if persist:
+        config.set("board", "max_items", applied)
+    return applied
+
+
+def rounds_lost_when_resized(count: object) -> int:
+    """How many rounds a resize to ``count`` would eject (0 if none)."""
+    applied = normalize_chamber_count(count)
+    return max(0, len(_board) - applied)
+
+
+def get_chamber(index: int) -> Optional[str]:
+    """Read one chamber by zero-based index, or None when empty/out of range."""
+    if not is_chamber_index(index, MAX_BOARD_SIZE):
+        return None
+    return get_board_item(index)
+
+
+def fire_chamber(index: int, auto_paste: bool = True) -> bool:
+    """Paste the chamber at zero-based ``index`` without mutating the board.
+
+    Returns False for an empty or out-of-range chamber.  Alias of
+    :func:`paste_from_board` with range validation against the cylinder.
+    """
+    if not is_chamber_index(index, MAX_BOARD_SIZE):
+        return False
+    return paste_from_board(index, auto_paste=auto_paste)
+
 
 def _save_pending_board() -> None:
     """Persist shutdown changes without rewriting an untouched board.

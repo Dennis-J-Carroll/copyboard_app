@@ -42,9 +42,16 @@ DEFAULT_CONFIG = {
         "quick_paste_8": "ctrl+alt+8",
         "quick_paste_9": "ctrl+alt+9",
         "quick_paste_10": "ctrl+alt+0",
+        "quick_paste_11": "ctrl+alt+shift+1",
+        "quick_paste_12": "ctrl+alt+shift+2",
+        "quick_paste_13": "ctrl+alt+shift+3",
+        "quick_paste_14": "ctrl+alt+shift+4",
+        "quick_paste_15": "ctrl+alt+shift+5",
+        "quick_paste_16": "ctrl+alt+shift+6",
         "paste_combo": "ctrl+alt+b"
     },
     "board": {
+        # Chambers in the cylinder: 10–16.  Existing installs keep 10.
         "max_items": 10,
         "auto_capture": True,
         "show_previews": True,

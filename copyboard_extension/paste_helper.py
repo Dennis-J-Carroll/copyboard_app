@@ -218,8 +218,10 @@ def _paste_linux() -> None:
         # First check if xdotool is installed
         subprocess.run(['which', 'xdotool'], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         
-        # Use xdotool to simulate Ctrl+V
-        subprocess.run(['xdotool', 'key', 'ctrl+v'], check=False)
+        # Use xdotool to simulate Ctrl+V.  --clearmodifiers releases any
+        # modifier the user is still holding from a global shortcut so the
+        # target app receives a clean Ctrl+V rather than Ctrl+Alt+V.
+        subprocess.run(['xdotool', 'key', '--clearmodifiers', 'ctrl+v'], check=False)
     except (subprocess.SubprocessError, FileNotFoundError):
         try:
             # Try alternative method using xvkbd
