@@ -910,7 +910,7 @@ class CopyboardGUI:
         if target is not None and paste_helper.restore_active_window(target):
             self.root.after(FIRE_PASTE_DELAY_MS, paste_helper.paste_current_clipboard)
             self._set_status(f"Fired chamber {chamber_label(index)}")
-            if from_widget and self._widget is not None:
+            if from_widget and self._widget is not None and self._widget_should_reopen():
                 self.root.after(FIRE_PASTE_DELAY_MS + 280, self._reshow_widget)
             return
 
@@ -923,9 +923,27 @@ class CopyboardGUI:
             self.root.lift()
         self._set_status(message, error=True)
 
+    def _widget_should_reopen(self) -> bool:
+        """Let go and it's gone — unless nothing else could bring it back.
+
+        The widget stays hidden after a fire so it never lingers over the
+        target app.  If the open-widget shortcut is not registered (no
+        ``keyboard`` backend, no permission) the widget reappears instead, so
+        the app can never become unreachable.
+        """
+        if config.get("window", "widget_reopen_after_fire", False):
+            return True
+        return self._hotkey_report.get("show_gui") != hotkeys.STATUS_REGISTERED
+
     def _reshow_widget(self) -> None:
         if not self._closing and self._widget is not None:
             self._widget.show()
+
+    def _capture_from_widget(self) -> None:
+        """COPY tab on the widget: load the current clipboard into chamber 01."""
+        self.capture_current()
+        if self._widget is not None:
+            self._widget.flash_message(self.status_var.get(), error="Clipboard" in self.status_var.get())
 
     # ------------------------------------------------------------------
     # Compact quick-paste widget
@@ -1014,6 +1032,7 @@ class CopyboardGUI:
                 on_move=self._save_widget_position,
                 get_count=core.get_chamber_count,
                 on_eject=self._eject_from_widget,
+                on_capture=self._capture_from_widget,
             )
         self.root.withdraw()
         self._widget.select(self.selected_index)

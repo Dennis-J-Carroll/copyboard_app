@@ -60,23 +60,29 @@ The app auto-captures new text copied anywhere on the desktop. Click a chamber
 to inspect or edit it, **Copy Only** to place it back on the clipboard, or
 **Fire & Hide** to minimise CopyBoard and paste into the previous app.
 
-Choose **Widget Mode** (or press `Ctrl+Alt+C`) for a compact always-on-top
-revolver that adapts its ring to the chamber count. Hover to preview a round,
-click it to quick-paste, or hold and drag before releasing for the same
-quick-fire gesture. The widget briefly hides, returns focus to the previous
-app, pastes, and then reappears. If focus cannot be returned (for example
-without `xdotool` on Linux) the round stays on the clipboard and the widget
-says so instead of pasting into the wrong window. Drag its header to
-reposition it; right-click or press Escape to return to the full editor.
+Choose **Widget Mode** (or press `Ctrl+Alt+C`) for the compact quick-paste
+plate: a brushed-steel squircle with a blue ring, dark recessed chambers that
+adapt to the chamber count, and **COPY** / **PASTE** tabs cut into the rim.
+Hover to preview a round, click it to quick-paste, or hold, drag, and let go
+for the same quick-fire gesture. When you let go the plate hides, focus returns
+to the previous app, and the round is pasted there; the plate stays out of the
+way until `Ctrl+Alt+C` brings it back. (If no global shortcut is available the
+plate reappears after pasting so the app can always be reached; set
+`window.widget_reopen_after_fire` to `true` to always get that behaviour.) If
+focus cannot be returned (for example without `xdotool` on Linux) the round
+stays on the clipboard and the plate says so instead of pasting into the wrong
+window. Drag bare steel to reposition the plate; `↗`, right-click, or Escape
+return to the full editor.
 
 Widget controls:
 
-- Mouse wheel (only while the pointer is over the widget) or `↑`/`↓`: aim at a
+- **COPY** tab: load the current clipboard into chamber 01
+- **PASTE** tab, `Enter`, `Space`, or a click on a chamber: fire the aimed round
+- Mouse wheel (only while the pointer is over the plate) or `↑`/`↓`: aim at a
   loaded round without firing it
-- `Enter`, `Space`, or a click: fire the aimed round
 - `1`–`9`, `0`, or two quick digits (`1` then `4` = chamber 14): aim by number
 - `Delete` twice: eject the aimed round (the first press only arms it)
-- `Esc` or right-click: back to the full editor
+- `Esc`, right-click, or `↗`: back to the full editor
 
 Editor keyboard controls:
 

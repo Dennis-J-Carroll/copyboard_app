@@ -23,7 +23,10 @@ DEFAULT_CONFIG = {
         "mini_mode": False,
         "opacity": 0.95,
         "widget_x": 80,
-        "widget_y": 80
+        "widget_y": 80,
+        # After a fire the widget stays hidden ("let go and it's gone") unless
+        # this is true or no global shortcut exists to bring it back.
+        "widget_reopen_after_fire": False
     },
     "hotkeys": {
         "show_gui": "ctrl+alt+c",

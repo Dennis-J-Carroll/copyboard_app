@@ -26,7 +26,10 @@ from copyboard_extension.chambers import (
     normalize_chamber_count,
 )
 from copyboard_extension.widget_mode import (
+    chamber_fill,
+    lerp_color,
     next_loaded_index,
+    tab_points,
     wheel_step,
     widget_layout,
 )
@@ -416,9 +419,26 @@ class TestWidgetGeometry:
         assert layout.ring_radius + outer + 2 <= layout.size / 2 + 40
         assert layout.ring_radius - outer > layout.hub_radius  # hub never touches the ring
 
-    def test_ten_chambers_keep_the_original_geometry(self):
+    def test_ten_chambers_keep_the_original_ring(self):
         layout = widget_layout(10)
-        assert (layout.size, layout.ring_radius, layout.chamber_radius) == (390, 128.0, 27.0)
+        assert (layout.ring_radius, layout.chamber_radius) == (128.0, 27.0)
+
+    @pytest.mark.parametrize("count", [10, 16])
+    def test_tabs_clear_the_top_and_bottom_chambers(self, count):
+        layout = widget_layout(count)
+        top_of_chamber_01 = layout.center_y - layout.ring_radius - layout.chamber_radius - 6
+        assert top_of_chamber_01 > layout.plate_margin + layout.tab_height + 4
+        assert layout.glow_radius + 4 < layout.size / 2 - layout.plate_margin
+
+    def test_steel_helpers(self):
+        assert lerp_color("#000000", "#ffffff", 0.5) == "#808080"
+        assert lerp_color("#000000", "#ffffff", 2.0) == "#ffffff"
+        assert chamber_fill(0, 16) == "#3d2a55"      # twelve o'clock is violet
+        assert chamber_fill(8, 16) == "#121b33"      # six o'clock is navy
+        top = tab_points(100, 10, 60, 20, flip=False)
+        assert top[:4] == [70, 10, 130, 10]          # wide edge on the rim
+        bottom = tab_points(100, 10, 60, 20, flip=True)
+        assert bottom[4:8] == [130, 30, 70, 30]
 
     def test_layout_normalises_bad_counts(self):
         assert widget_layout(3).count == 10
@@ -544,6 +564,44 @@ class TestQuickPasteWidgetTk:
         assert fired == []
         assert "empty" in widget.preview_var.get().lower()
 
+    def test_copy_tab_captures_and_paste_tab_fires(self, tk_root):
+        from copyboard_extension.widget_mode import QuickPasteWidget
+
+        items, fired, captured = ["a", "b", "c"], [], []
+        widget = QuickPasteWidget(
+            parent=tk_root,
+            get_items=lambda: list(items),
+            describe_item=lambda text: ("TEXT", "T", text),
+            on_fire=fired.append,
+            on_restore=lambda: None,
+            get_count=lambda: 10,
+            on_capture=lambda: captured.append(True),
+        )
+        widget.show()
+        tk_root.update()
+        x0, y0, x1, y1 = widget._tabs["copy"]
+        cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+        widget._on_press(_Event(x=cx, y=cy, x_root=cx, y_root=cy))
+        widget._on_release(_Event(x=cx, y=cy, x_root=cx, y_root=cy))
+        assert captured == [True] and fired == []
+        widget.select(2)
+        x0, y0, x1, y1 = widget._tabs["paste"]
+        cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+        widget._on_press(_Event(x=cx, y=cy, x_root=cx, y_root=cy))
+        widget._on_release(_Event(x=cx, y=cy, x_root=cx, y_root=cy))
+        _pump(tk_root, 0.2)
+        assert fired == [2]
+
+    def test_dragging_bare_steel_moves_the_plate_without_firing(self, tk_root):
+        widget, fired, _ = self._widget(tk_root, ["a", "b"])
+        x = y = widget.layout.plate_margin + 30   # corner of the plate, no chamber or tab
+        widget._on_press(_Event(x=x, y=y, x_root=200, y_root=200))
+        widget._on_round_drag(_Event(x=x, y=y, x_root=260, y_root=240))
+        widget._on_release(_Event(x=x, y=y, x_root=260, y_root=240))
+        _pump(tk_root, 0.15)
+        assert fired == []
+        assert widget.selected_index == 0
+
     def test_eject_needs_two_deliberate_presses(self, tk_root):
         items = ["a", "b", "c"]
         widget, fired, ejected = self._widget(tk_root, items)
@@ -667,6 +725,37 @@ class TestEditorTk:
         editor._deliver_fire(0, object(), from_widget=False)
         _pump(editor.root, 0.35)
         assert pasted == [True]
+        assert core.get_board() == ["payload"]
+
+    def test_widget_stays_hidden_after_fire_only_when_a_shortcut_can_reopen_it(self, editor, fresh_config):
+        editor._hotkey_report = {"show_gui": hotkeys.STATUS_REGISTERED}
+        assert editor._widget_should_reopen() is False
+        editor._hotkey_report = {"show_gui": hotkeys.STATUS_UNAVAILABLE}
+        assert editor._widget_should_reopen() is True      # never strand the user
+        editor._hotkey_report = {"show_gui": hotkeys.STATUS_REGISTERED}
+        fresh_config.set("window", "widget_reopen_after_fire", True)
+        assert editor._widget_should_reopen() is True
+
+    def test_let_go_fires_hides_and_does_not_come_back(self, editor, monkeypatch):
+        from copyboard_extension import paste_helper
+
+        pasted = []
+        monkeypatch.setattr(paste_helper, "restore_active_window", lambda target: True)
+        monkeypatch.setattr(paste_helper, "paste_current_clipboard", lambda: pasted.append(True))
+        core.copy_to_board("payload")
+        editor.refresh()
+        editor._hotkey_report = {"show_gui": hotkeys.STATUS_REGISTERED}
+        editor._paste_target = object()
+        editor.open_widget()
+        editor.root.update()
+        widget = editor._widget
+        x, y = widget._centers[0]
+        widget._on_press(_Event(x=x, y=y, x_root=x, y_root=y))
+        widget._on_round_drag(_Event(x=x, y=y, x_root=x + 40, y_root=y + 30))
+        widget._on_release(_Event(x=x, y=y, x_root=x + 40, y_root=y + 30))
+        _pump(editor.root, 0.8)
+        assert pasted == [True]
+        assert widget.is_visible() is False
         assert core.get_board() == ["payload"]
 
     def test_hotkey_notification_is_applied_on_tk_thread(self, editor):

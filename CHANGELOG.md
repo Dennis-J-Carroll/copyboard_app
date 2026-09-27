@@ -12,6 +12,11 @@
   thread-safe fired-chamber notification routed through the Tk event loop
 - Mouse-wheel and arrow-key aiming in the quick-paste widget (never fires),
   Enter/Space to fire, digit dialling up to chamber 16, and a two-press eject
+- Quick-paste widget redesigned as a brushed-steel plate with a blue glow
+  ring, violet-to-navy recessed chambers, a bolt-hole hub showing the loaded
+  count, and COPY / PASTE tabs (capture the clipboard / fire the aimed round);
+  the plate itself drags, and it stays hidden after a fire whenever a global
+  shortcut can bring it back (`window.widget_reopen_after_fire` overrides)
 - Chamber numbering helpers (`copyboard_extension.chambers`) as the single
   conversion point between board indexes and the `01`–`16` labels
 
