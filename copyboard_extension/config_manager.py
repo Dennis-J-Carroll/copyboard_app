@@ -26,7 +26,9 @@ DEFAULT_CONFIG = {
         "widget_y": 80,
         # After a fire the widget stays hidden ("let go and it's gone") unless
         # this is true or no global shortcut exists to bring it back.
-        "widget_reopen_after_fire": False
+        "widget_reopen_after_fire": False,
+        # Open the plate under the mouse pointer instead of its saved spot.
+        "widget_at_pointer": True
     },
     "hotkeys": {
         "show_gui": "ctrl+alt+c",

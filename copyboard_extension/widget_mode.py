@@ -37,6 +37,7 @@ ItemDescription = Tuple[str, str, str]
 # ring, dark recessed chambers, and COPY / PASTE tabs cut into the rim.  The
 # palette is kept literal here so the widget stays importable on its own.
 BACKDROP = "#0B0C0F"        # what shows around the plate's rounded corners
+CAPTION_BG = "#14161B"      # caption pill under the plate (kept opaque on Windows)
 PLATE = "#D6D8DE"
 PLATE_EDGE = "#F4F5F7"
 PLATE_SHADOW = "#A9ADB6"
@@ -55,6 +56,10 @@ TEXT = "#F2F4F8"
 TEXT_DIM = "#AEB3BD"
 TEXT_FAINT = "#7C8290"
 LABEL_ON_STEEL = "#3A3F4A"
+HAIRLINE_A = "#C3C6CD"     # machined rings on the dial face
+HAIRLINE_B = "#D0D3D9"
+CHAMBER_CORE = "#4A3868"   # lit centre of a loaded chamber
+CHAMBER_CORE_BOTTOM = "#1B2745"
 HOVER = "#7FC6FF"
 FIRE = "#4DB8FF"
 ERROR = "#E56B6F"
@@ -63,7 +68,7 @@ SANS = "DejaVu Sans"
 
 IDLE_PROMPT = "WHEEL OR ↑↓ TO AIM   •   HOLD, DRAG, LET GO TO PASTE"
 CHAMBER_HIT_PADDING = 8  # extra pixels of forgiveness around each chamber
-FIRE_FLASH_MS = 70        # brief accent flash before the host hides the widget
+FIRE_FLASH_MS = 45        # brief accent flash before the host hides the widget
 EJECT_CONFIRM_MS = 2500   # second Delete must arrive within this window
 
 
@@ -165,6 +170,28 @@ def tab_points(cx: float, top: float, width: float, height: float, flip: bool) -
     return [cx - half + inset, top, cx + half - inset, top, cx + half, top + height, cx - half, top + height]
 
 
+def position_under_pointer(
+    pointer_x: int, pointer_y: int, size: int, height: int, screen_w: int, screen_h: int
+) -> Tuple[int, int]:
+    """Top-left corner that puts the hub under the pointer, kept on screen."""
+    x = int(pointer_x - size / 2)
+    y = int(pointer_y - size / 2)
+    x = max(0, min(x, max(0, screen_w - size)))
+    y = max(0, min(y, max(0, screen_h - height)))
+    return x, y
+
+
+def glow_bands(plate: str, outer: str, core: str) -> List[Tuple[str, int]]:
+    """Colour/width pairs that fake a blurred neon ring, outermost first."""
+    return [
+        (lerp_color(plate, outer, 0.35), 14),
+        (lerp_color(plate, outer, 0.7), 10),
+        (outer, 7),
+        (lerp_color(outer, core, 0.55), 4),
+        (core, 2),
+    ]
+
+
 def radial_centers(
     count: int, center_x: float, center_y: float, radius: float
 ) -> List[Point]:
@@ -231,6 +258,7 @@ class QuickPasteWidget:
         get_count: Optional[Callable[[], int]] = None,
         on_eject: Optional[Callable[[int], bool]] = None,
         on_capture: Optional[Callable[[], None]] = None,
+        on_dismiss: Optional[Callable[[], None]] = None,
     ) -> None:
         self.parent = parent
         self.get_items = get_items
@@ -239,9 +267,12 @@ class QuickPasteWidget:
         self.on_restore = on_restore
         self.on_eject = on_eject
         self.on_capture = on_capture
+        self._on_dismiss = on_dismiss
         self._tabs: dict = {}          # "copy" / "paste" -> (x0, y0, x1, y1)
         self._hovered_tab: Optional[str] = None
         self._plate_drag: Optional[Point] = None
+        self._static_layout: Optional[WidgetLayout] = None
+        self.on_dismiss: Optional[Callable[[], None]] = None
         self.get_count = get_count or (lambda: DEFAULT_CHAMBERS)
         self.initial_position = (int(initial_position[0]), int(initial_position[1]))
         self.on_move = on_move
@@ -267,15 +298,35 @@ class QuickPasteWidget:
     # ------------------------------------------------------------------
     # Visibility
     # ------------------------------------------------------------------
-    def show(self) -> None:
+    def show(self, at: Optional[Point] = None) -> None:
+        """Show the plate; with ``at`` the hub is placed under that root point."""
         if self.window is None or not self.window.winfo_exists():
             self._build()
         assert self.window is not None
         self._sync_layout()
+        if at is not None:
+            x, y = position_under_pointer(
+                int(at[0]), int(at[1]), self.layout.size, self.layout.size + 24,
+                self.window.winfo_screenwidth(), self.window.winfo_screenheight(),
+            )
+            self.window.geometry(f"+{x}+{y}")
         self.redraw()
         self._show_selected_preview()
         self.window.deiconify()
         self.window.lift()
+
+    def prebuild(self) -> None:
+        """Create the window once at startup so the first open is instant."""
+        if self.window is None or not self.window.winfo_exists():
+            self._build()
+            self.hide()
+
+    def dismiss(self) -> None:
+        """Escape: get out of the way without opening the full editor."""
+        if self._on_dismiss is not None:
+            self._on_dismiss()
+        else:
+            self.on_restore()
 
     def hide(self) -> None:
         self._disarm_eject()
@@ -301,10 +352,11 @@ class QuickPasteWidget:
         if index is None:
             return
         count = self.layout.count
+        previous = self._selected
         self._selected = max(0, min(count - 1, int(index)))
         self._disarm_eject()
         self._show_selected_preview()
-        self.redraw()
+        self._refresh_chambers(previous, self._selected)
 
     def select_relative(self, step: int) -> None:
         loaded = len(self.get_items())
@@ -354,6 +406,7 @@ class QuickPasteWidget:
         layout = widget_layout(self.get_count())
         if layout != self.layout or not self._centers:
             self.layout = layout
+            self._static_layout = None
             if self.window is not None and self.window.winfo_exists():
                 self.window.geometry(f"{layout.size}x{layout.size + 24}")
             if self.canvas is not None and self.canvas.winfo_exists():
@@ -364,55 +417,150 @@ class QuickPasteWidget:
     # Drawing
     # ------------------------------------------------------------------
     def redraw(self) -> None:
+        """Redraw.  The plate, glow, and dial are cached between hovers; only
+        chambers, hub readout, and tabs are rebuilt on each state change."""
         if self.canvas is None or not self.canvas.winfo_exists():
             return
+        if self._static_layout != self.layout:
+            self.canvas.delete("all")
+            self._draw_static()
+            self._static_layout = self.layout
+        self._draw_dynamic()
 
+    def _draw_static(self) -> None:
         canvas = self.canvas
-        canvas.delete("all")
-        items = list(self.get_items())
+        assert canvas is not None
         layout = self.layout
         size = layout.size
         cx, cy = layout.center_x, layout.center_y
-        ring = layout.ring_radius
-        radius = layout.chamber_radius
-        self._centers = radial_centers(layout.count, cx, cy, ring)
-
-        # Plate: a steel squircle with a bright top edge and a shadowed base.
         m = layout.plate_margin
         corner = size * 0.19
+        # Plate: shadow, body, and a bright top-edge highlight.
         canvas.create_polygon(
-            rounded_rect_points(m + 1, m + 3, size - m + 1, size - m + 3, corner),
-            smooth=True, fill=PLATE_SHADOW, outline="",
+            rounded_rect_points(m + 1, m + 4, size - m + 1, size - m + 4, corner),
+            smooth=True, fill=PLATE_SHADOW, outline="", tags="static",
         )
         canvas.create_polygon(
             rounded_rect_points(m, m, size - m, size - m, corner),
-            smooth=True, fill=PLATE, outline=PLATE_EDGE, width=2,
+            smooth=True, fill=PLATE, outline=PLATE_EDGE, width=2, tags="static",
         )
-
-        # Glow ring, drawn as stepped bands since Tk cannot blur.
+        canvas.create_polygon(
+            rounded_rect_points(m + 6, m + 6, size - m - 6, size - m - 6, corner - 6),
+            smooth=True, fill="", outline=lerp_color(PLATE, PLATE_EDGE, 0.5), width=1, tags="static",
+        )
+        # Glow ring as five blended bands.
         glow = layout.glow_radius
-        for offset, color, width in ((0, GLOW_OUTER, 9), (0, GLOW, 5), (0, GLOW_CORE, 2)):
+        for color, width in glow_bands(PLATE, GLOW_OUTER, GLOW_CORE):
             canvas.create_oval(
-                cx - glow + offset, cy - glow + offset, cx + glow - offset, cy + glow - offset,
-                outline=color, width=width,
+                cx - glow, cy - glow, cx + glow, cy + glow,
+                outline=color, width=width, tags="static",
             )
-        dial = glow - 8
+        # Dial face with machined concentric hairlines.
+        dial = glow - 10
         canvas.create_oval(
             cx - dial, cy - dial, cx + dial, cy + dial,
-            fill=DIAL, outline=DIAL_EDGE, width=2,
+            fill=DIAL, outline=DIAL_EDGE, width=2, tags="static",
+        )
+        r = layout.hub_radius + 12
+        toggle = False
+        while r < dial - 6:
+            canvas.create_oval(
+                cx - r, cy - r, cx + r, cy + r,
+                outline=HAIRLINE_A if toggle else HAIRLINE_B, width=1, tags="static",
+            )
+            toggle = not toggle
+            r += 4
+        # Chamber bores (the recess itself never changes; the fill does).
+        for x, y in radial_centers(layout.count, cx, cy, layout.ring_radius):
+            rad = layout.chamber_radius
+            canvas.create_oval(
+                x - rad - 5, y - rad - 5, x + rad + 5, y + rad + 5,
+                fill=PLATE_EDGE, outline="", tags="static",
+            )
+            canvas.create_oval(
+                x - rad - 3, y - rad - 2, x + rad + 5, y + rad + 6,
+                fill=STEEL_DARK, outline="", tags="static",
+            )
+        # Hub base.
+        hub = layout.hub_radius
+        canvas.create_oval(
+            cx - hub - 3, cy - hub - 1, cx + hub + 3, cy + hub + 5,
+            fill=STEEL_DARK, outline="", tags="static",
+        )
+        canvas.create_oval(
+            cx - hub, cy - hub, cx + hub, cy + hub,
+            fill=DIAL, outline=PLATE_EDGE, width=2, tags="static",
+        )
+        bolt_ring = hub * 0.72
+        for i in range(8):
+            angle = -math.pi / 2 + i * math.pi / 4
+            bx = cx + bolt_ring * math.cos(angle)
+            by = cy + bolt_ring * math.sin(angle)
+            canvas.create_oval(bx - 5, by - 5, bx + 5, by + 5, fill=CHAMBER_BOTTOM, outline=STEEL_DARK, tags="static")
+        core = hub * 0.42
+        canvas.create_oval(
+            cx - core - 5, cy - core - 5, cx + core + 5, cy + core + 5,
+            fill=PLATE_EDGE, outline=STEEL_DARK, width=1, tags="static",
+        )
+        canvas.create_oval(
+            cx - core, cy - core, cx + core, cy + core,
+            fill="#1A1430", outline="#0E0F14", width=1, tags="static",
         )
 
+    def _draw_dynamic(self) -> None:
+        canvas = self.canvas
+        assert canvas is not None
+        canvas.delete("dyn")
+        items = list(self.get_items())
+        layout = self.layout
+        cx, cy = layout.center_x, layout.center_y
+        self._centers = radial_centers(layout.count, cx, cy, layout.ring_radius)
         for index, (x, y) in enumerate(self._centers):
-            self._draw_chamber(index, x, y, radius, items)
-
-        self._draw_hub(cx, cy, layout.hub_radius, items)
-        self._draw_tabs(cx, size, layout)
-
-        # Corner affordance back to the full editor.
+            self._draw_chamber(index, x, y, layout.chamber_radius, items)
+        self._draw_readout(items)
+        self._draw_tabs(cx, layout.size, layout)
+        m = layout.plate_margin
         canvas.create_text(
-            size - m - 16, m + 16, text="↗", fill=LABEL_ON_STEEL,
-            font=(MONO, 13, "bold"), tags=("restore",),
+            layout.size - m - 16, m + 16, text="↗", fill=LABEL_ON_STEEL,
+            font=(MONO, 13, "bold"), tags="dyn",
         )
+
+    def _draw_readout(self, items) -> None:
+        canvas = self.canvas
+        assert canvas is not None
+        layout = self.layout
+        cx, cy = layout.center_x, layout.center_y
+        canvas.create_text(
+            cx, cy - 6, text=f"{len(items):02d}", fill=TEXT, font=(MONO, 12, "bold"),
+            tags=("dyn", "readout"),
+        )
+        canvas.create_text(
+            cx, cy + 9, text=f"of {layout.count}", fill=TEXT_DIM, font=(MONO, 6, "bold"),
+            tags=("dyn", "readout"),
+        )
+
+    def _refresh_chambers(self, *indices: Optional[int]) -> None:
+        """Redraw only the chambers whose state changed (hover, aim, arm)."""
+        canvas = self.canvas
+        if canvas is None or not canvas.winfo_exists() or not self._centers:
+            self.redraw()
+            return
+        if self._static_layout != self.layout:
+            self.redraw()
+            return
+        items = list(self.get_items())
+        for index in {i for i in indices if i is not None and 0 <= i < len(self._centers)}:
+            canvas.delete(f"ch{index}")
+            x, y = self._centers[index]
+            self._draw_chamber(index, x, y, self.layout.chamber_radius, items)
+
+    def _refresh_tabs(self) -> None:
+        canvas = self.canvas
+        if canvas is None or not canvas.winfo_exists() or self._static_layout != self.layout:
+            self.redraw()
+            return
+        canvas.delete("tabs")
+        self._draw_tabs(self.layout.center_x, self.layout.size, self.layout)
 
     def _draw_chamber(self, index: int, x: float, y: float, radius: float, items) -> None:
         canvas = self.canvas
@@ -422,31 +570,29 @@ class QuickPasteWidget:
         pressed = index == self._pressed or index == self._flashing
         selected = index == self._selected
         armed = index == self._eject_armed
+        tag = ("dyn", f"ch{index}")
+        t = (math.sin(-math.pi / 2 + index * 2 * math.pi / max(1, self.layout.count)) + 1) / 2
 
-        # Bevel: a light rim offset up-left, a dark rim offset down-right.
-        canvas.create_oval(
-            x - radius - 4, y - radius - 4, x + radius + 4, y + radius + 4,
-            fill=PLATE_EDGE, outline="",
-        )
-        canvas.create_oval(
-            x - radius - 2, y - radius - 1, x + radius + 4, y + radius + 5,
-            fill=STEEL_DARK, outline="",
-        )
         if occupied:
-            fill = chamber_fill(index, self.layout.count)
-            inner_ring = CHAMBER_RING
+            edge = lerp_color(CHAMBER_TOP, CHAMBER_BOTTOM, t)
+            core = lerp_color(CHAMBER_CORE, CHAMBER_CORE_BOTTOM, t)
+            rings = ((1.0, edge), (0.78, lerp_color(edge, core, 0.5)), (0.55, core))
+            outline = "#0E0F14"
         else:
-            fill, inner_ring = EMPTY_FILL, EMPTY_RING
+            rings = ((1.0, EMPTY_FILL), (0.72, lerp_color(EMPTY_FILL, PLATE_SHADOW, 0.6)))
+            outline = STEEL_DARK
         if pressed:
-            fill = FIRE
-        canvas.create_oval(
-            x - radius, y - radius, x + radius, y + radius,
-            fill=fill, outline="#0E0F14" if occupied else STEEL_DARK, width=1,
-        )
+            rings = ((1.0, FIRE), (0.6, GLOW_CORE))
+        for scale, color in rings:
+            rr = radius * scale
+            canvas.create_oval(
+                x - rr, y - rr, x + rr, y + rr,
+                fill=color, outline=outline if scale == 1.0 else "", width=1, tags=tag,
+            )
         inset = radius * 0.72
         canvas.create_oval(
             x - inset, y - inset, x + inset, y + inset,
-            outline=inner_ring, width=1,
+            outline=CHAMBER_RING if occupied else EMPTY_RING, width=1, tags=tag,
         )
         if armed:
             ring_color, ring_width = ERROR, 4
@@ -458,54 +604,21 @@ class QuickPasteWidget:
             ring_color, ring_width = None, 0
         if ring_color:
             canvas.create_oval(
-                x - radius - 6, y - radius - 6, x + radius + 6, y + radius + 6,
-                outline=ring_color, width=ring_width,
+                x - radius - 7, y - radius - 7, x + radius + 7, y + radius + 7,
+                outline=ring_color, width=ring_width, tags=tag,
             )
-
-        number_color = TEXT if occupied else LABEL_ON_STEEL
+        big = radius >= 25
         canvas.create_text(
-            x, y - 7, text=chamber_label(index), fill=number_color,
-            font=(MONO, 9, "bold"),
+            x, y - (8 if big else 7), text=chamber_label(index),
+            fill=TEXT if occupied else LABEL_ON_STEEL,
+            font=(MONO, 10 if big else 9, "bold"), tags=tag,
         )
         if occupied:
             _kind, mark, _preview = self.describe_item(items[index])
             canvas.create_text(
-                x, y + 9, text=mark, fill=TEXT_DIM, font=(MONO, 8, "bold")
+                x, y + (10 if big else 9), text=mark, fill=TEXT_DIM,
+                font=(MONO, 8, "bold"), tags=tag,
             )
-
-    def _draw_hub(self, cx: float, cy: float, hub: float, items) -> None:
-        canvas = self.canvas
-        assert canvas is not None
-        canvas.create_oval(
-            cx - hub - 3, cy - hub - 1, cx + hub + 3, cy + hub + 5,
-            fill=STEEL_DARK, outline="",
-        )
-        canvas.create_oval(
-            cx - hub, cy - hub, cx + hub, cy + hub,
-            fill=DIAL, outline=PLATE_EDGE, width=2,
-        )
-        # Eight bolt holes, purely for the machined look.
-        bolt_ring = hub * 0.72
-        for i in range(8):
-            angle = -math.pi / 2 + i * math.pi / 4
-            bx = cx + bolt_ring * math.cos(angle)
-            by = cy + bolt_ring * math.sin(angle)
-            canvas.create_oval(bx - 5, by - 5, bx + 5, by + 5, fill=CHAMBER_BOTTOM, outline=STEEL_DARK)
-        core = hub * 0.42
-        canvas.create_oval(
-            cx - core - 5, cy - core - 5, cx + core + 5, cy + core + 5,
-            fill=PLATE_EDGE, outline=STEEL_DARK, width=1,
-        )
-        canvas.create_oval(
-            cx - core, cy - core, cx + core, cy + core,
-            fill="#1A1430", outline="#0E0F14", width=1,
-        )
-        canvas.create_text(
-            cx, cy - 6, text=f"{len(items):02d}", fill=TEXT, font=(MONO, 12, "bold")
-        )
-        canvas.create_text(
-            cx, cy + 9, text=f"of {self.layout.count}", fill=TEXT_DIM, font=(MONO, 6, "bold")
-        )
 
     def _draw_tabs(self, cx: float, size: float, layout: WidgetLayout) -> None:
         """COPY hangs from the top rim, PASTE rises from the bottom rim."""
@@ -521,15 +634,15 @@ class QuickPasteWidget:
             x0, y0, _x1, _y1 = self._tabs[name]
             hovered = name == self._hovered_tab
             points = tab_points(cx, y0, width, height, flip)
-            canvas.create_polygon(points, fill=STEEL_DARK, outline="")
+            canvas.create_polygon(points, fill=STEEL_DARK, outline="", tags=("dyn", "tabs"))
             shifted = [v - (0 if i % 2 == 0 else 2) for i, v in enumerate(points)]
             canvas.create_polygon(
-                shifted, fill=PLATE_EDGE if hovered else PLATE,
-                outline=HOVER if hovered else PLATE_EDGE, width=2,
+                shifted, fill=lerp_color(PLATE, GLOW_CORE, 0.35) if hovered else PLATE,
+                outline=HOVER if hovered else PLATE_EDGE, width=2, tags=("dyn", "tabs"),
             )
             canvas.create_text(
                 cx, y0 + height / 2 - 1, text=name.upper(),
-                fill=GLOW_OUTER if hovered else LABEL_ON_STEEL, font=(SANS, 11, "bold"),
+                fill=GLOW_OUTER if hovered else LABEL_ON_STEEL, font=(SANS, 11, "bold"), tags=("dyn", "tabs"),
             )
 
     def _tab_at(self, x: float, y: float) -> Optional[str]:
@@ -560,7 +673,12 @@ class QuickPasteWidget:
             pass
         window.configure(bg=BACKDROP)
         window.geometry(f"{layout.size}x{layout.size + 24}+{x}+{y}")
-        window.bind("<Escape>", lambda _event: self.on_restore())
+        try:
+            # Windows can key out the backdrop so only the plate is visible.
+            window.attributes("-transparentcolor", BACKDROP)
+        except tk.TclError:
+            pass
+        window.bind("<Escape>", lambda _event: self.dismiss())
         window.bind("<Button-3>", lambda _event: self.on_restore())
         window.bind("<Return>", lambda _event: self.fire_selected())
         window.bind("<KP_Enter>", lambda _event: self.fire_selected())
@@ -590,7 +708,7 @@ class QuickPasteWidget:
         self.canvas.bind("<Button-5>", self._on_wheel)
 
         self.preview_label = tk.Label(
-            window, textvariable=self.preview_var, anchor=tk.CENTER, bg=BACKDROP,
+            window, textvariable=self.preview_var, anchor=tk.CENTER, bg=CAPTION_BG,
             fg=TEXT_DIM, padx=10, font=(MONO, 8),
         )
         self.preview_label.pack(fill=tk.BOTH, expand=True)
@@ -610,30 +728,35 @@ class QuickPasteWidget:
         tab = self._tab_at(event.x, event.y)
         if hovered == self._hovered and tab == self._hovered_tab:
             return
-        self._hovered = hovered
+        previous, self._hovered = self._hovered, hovered
+        tab_changed = tab != self._hovered_tab
         self._hovered_tab = tab
+        if tab_changed:
+            self._refresh_tabs()
         if tab is not None and self._eject_armed is None:
             self._set_preview(
                 "COPY: LOAD THE CURRENT CLIPBOARD INTO CHAMBER 01"
                 if tab == "copy"
                 else f"PASTE: FIRE CHAMBER {chamber_label(self._selected)} INTO THE PREVIOUS APP"
             )
-            self.redraw()
+            self._refresh_chambers(previous, hovered)
             return
         if self._eject_armed is None:
             if hovered is None:
                 self._show_selected_preview()
             else:
                 self._set_preview(self._describe(hovered))
-        self.redraw()
+        self._refresh_chambers(previous, hovered)
 
     def _on_leave(self, _event) -> None:
         if self._pressed is None:
-            self._hovered = None
-            self._hovered_tab = None
+            previous, self._hovered = self._hovered, None
+            if self._hovered_tab is not None:
+                self._hovered_tab = None
+                self._refresh_tabs()
             if self._eject_armed is None:
                 self._show_selected_preview()
-            self.redraw()
+            self._refresh_chambers(previous)
 
     def _on_press(self, event) -> None:
         if self.window is not None and self.window.winfo_exists():

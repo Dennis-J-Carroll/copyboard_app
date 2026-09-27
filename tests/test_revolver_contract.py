@@ -27,8 +27,10 @@ from copyboard_extension.chambers import (
 )
 from copyboard_extension.widget_mode import (
     chamber_fill,
+    glow_bands,
     lerp_color,
     next_loaded_index,
+    position_under_pointer,
     tab_points,
     wheel_step,
     widget_layout,
@@ -430,6 +432,18 @@ class TestWidgetGeometry:
         assert top_of_chamber_01 > layout.plate_margin + layout.tab_height + 4
         assert layout.glow_radius + 4 < layout.size / 2 - layout.plate_margin
 
+    def test_plate_opens_under_pointer_but_stays_on_screen(self):
+        assert position_under_pointer(700, 400, 420, 444, 1920, 1080) == (490, 190)
+        assert position_under_pointer(10, 10, 420, 444, 1920, 1080) == (0, 0)
+        assert position_under_pointer(1915, 1075, 420, 444, 1920, 1080) == (1500, 636)
+        assert position_under_pointer(100, 100, 420, 444, 300, 300) == (0, 0)  # tiny screen
+
+    def test_glow_bands_blend_from_plate_to_core(self):
+        bands = glow_bands("#d6d8de", "#2b6fc4", "#bfebff")
+        assert bands[0][1] > bands[-1][1]              # wide soft edge, thin bright core
+        assert bands[2][0] == "#2b6fc4"
+        assert bands[-1][0] == "#bfebff"
+
     def test_steel_helpers(self):
         assert lerp_color("#000000", "#ffffff", 0.5) == "#808080"
         assert lerp_color("#000000", "#ffffff", 2.0) == "#ffffff"
@@ -592,6 +606,46 @@ class TestQuickPasteWidgetTk:
         _pump(tk_root, 0.2)
         assert fired == [2]
 
+    def test_hover_redraws_only_the_chambers_that_changed(self, tk_root):
+        widget, fired, _ = self._widget(tk_root, [f"r{i}" for i in range(16)])
+        static_before = len(widget.canvas.find_withtag("static"))
+        assert static_before > 0
+        x, y = widget._centers[5]
+        widget._on_motion(_Event(x=x, y=y))
+        assert widget._hovered == 5
+        assert len(widget.canvas.find_withtag("static")) == static_before  # plate untouched
+        assert widget.canvas.find_withtag("ch5")                            # redrawn chamber
+        widget._on_leave(_Event())
+        assert widget._hovered is None and fired == []
+
+    def test_prebuild_creates_hidden_window(self, tk_root):
+        from copyboard_extension.widget_mode import QuickPasteWidget
+
+        widget = QuickPasteWidget(
+            parent=tk_root, get_items=lambda: [], describe_item=lambda t: ("TEXT", "T", t),
+            on_fire=lambda i: None, on_restore=lambda: None, get_count=lambda: 10,
+        )
+        widget.prebuild()
+        tk_root.update()
+        assert widget.window is not None and widget.window.winfo_exists()
+        assert widget.is_visible() is False
+        widget.show(at=(300, 300))
+        tk_root.update()
+        assert widget.is_visible() is True
+
+    def test_escape_dismisses_through_host_when_provided(self, tk_root):
+        from copyboard_extension.widget_mode import QuickPasteWidget
+
+        restored, dismissed = [], []
+        widget = QuickPasteWidget(
+            parent=tk_root, get_items=lambda: ["a"], describe_item=lambda t: ("TEXT", "T", t),
+            on_fire=lambda i: None, on_restore=lambda: restored.append(True),
+            get_count=lambda: 10, on_dismiss=lambda: dismissed.append(True),
+        )
+        widget.show()
+        widget.dismiss()
+        assert dismissed == [True] and restored == []
+
     def test_dragging_bare_steel_moves_the_plate_without_firing(self, tk_root):
         widget, fired, _ = self._widget(tk_root, ["a", "b"])
         x = y = widget.layout.plate_margin + 30   # corner of the plate, no chamber or tab
@@ -735,6 +789,33 @@ class TestEditorTk:
         editor._hotkey_report = {"show_gui": hotkeys.STATUS_REGISTERED}
         fresh_config.set("window", "widget_reopen_after_fire", True)
         assert editor._widget_should_reopen() is True
+
+    def test_escape_hides_plate_and_keeps_editor_hidden_when_shortcut_exists(self, editor):
+        editor._hotkey_report = {"show_gui": hotkeys.STATUS_REGISTERED}
+        editor.open_widget()
+        editor.root.update()
+        assert editor._widget.is_visible()
+        editor._widget.dismiss()
+        editor.root.update()
+        assert editor._widget.is_visible() is False
+        assert editor.root.state() == "withdrawn"
+
+    def test_escape_falls_back_to_editor_without_shortcut(self, editor):
+        editor._hotkey_report = {"show_gui": hotkeys.STATUS_UNAVAILABLE}
+        editor.open_widget()
+        editor.root.update()
+        editor._widget.dismiss()
+        editor.root.update()
+        assert editor._widget.is_visible() is False
+        assert editor.root.state() != "withdrawn"
+
+    def test_open_widget_places_plate_under_pointer(self, editor, fresh_config, monkeypatch):
+        fresh_config.set("window", "widget_at_pointer", True)
+        monkeypatch.setattr(editor.root, "winfo_pointerxy", lambda: (600, 500))
+        editor.open_widget()
+        _pump(editor.root, 0.2)
+        size = editor._widget.layout.size
+        assert (editor._widget.window.winfo_x(), editor._widget.window.winfo_y()) == (600 - size // 2, 500 - size // 2)
 
     def test_let_go_fires_hides_and_does_not_come_back(self, editor, monkeypatch):
         from copyboard_extension import paste_helper

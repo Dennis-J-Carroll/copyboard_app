@@ -17,6 +17,10 @@
   count, and COPY / PASTE tabs (capture the clipboard / fire the aimed round);
   the plate itself drags, and it stays hidden after a fire whenever a global
   shortcut can bring it back (`window.widget_reopen_after_fire` overrides)
+- The plate is prebuilt at startup, opens under the mouse pointer
+  (`window.widget_at_pointer`), redraws only the chambers that change on
+  hover, keys out its backdrop on Windows, and dismisses on Escape without
+  opening the editor; fire delays were trimmed (45 ms flash, 140 ms paste)
 - Chamber numbering helpers (`copyboard_extension.chambers`) as the single
   conversion point between board indexes and the `01`–`16` labels
 

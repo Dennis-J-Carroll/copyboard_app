@@ -67,8 +67,9 @@ MONO = "DejaVu Sans Mono"
 
 # How long the editor waits after hiding itself before restoring focus and
 # synthesising the paste keystroke.
-FIRE_FOCUS_DELAY_MS = 120
-FIRE_PASTE_DELAY_MS = 180
+FIRE_FOCUS_DELAY_MS = 90
+FIRE_PASTE_DELAY_MS = 140
+UI_ACTION_POLL_MS = 40   # how quickly a global shortcut reaches the Tk thread
 # Clipboard poll ticks (650 ms each) between foreground-window captures.
 TARGET_POLL_TICKS = 3 if paste_helper.get_platform() == "macos" else 1
 
@@ -173,6 +174,9 @@ class CopyboardGUI:
         self._schedule_clipboard_poll()
         self._schedule_ui_action_poll()
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
+        # Build the quick-paste plate once the editor is up so the first
+        # shortcut press shows it with no construction stall.
+        self.root.after(250, self._prebuild_widget)
 
     # ------------------------------------------------------------------
     # Capacity
@@ -961,7 +965,7 @@ class CopyboardGUI:
 
     def _schedule_ui_action_poll(self) -> None:
         if not self._closing:
-            self.root.after(90, self._poll_ui_actions)
+            self.root.after(UI_ACTION_POLL_MS, self._poll_ui_actions)
 
     def _poll_ui_actions(self) -> None:
         if self._closing:
@@ -1010,14 +1014,7 @@ class CopyboardGUI:
         if target is not None:
             self._paste_target = target
 
-    def open_widget(self) -> None:
-        """Collapse the editor into the compact quick-paste overlay."""
-        if self._widget is not None and self._widget.is_visible():
-            self._restore_from_widget()
-            return
-
-        self._capture_paste_target()
-
+    def _ensure_widget(self) -> QuickPasteWidget:
         if self._widget is None:
             self._widget = QuickPasteWidget(
                 parent=self.root,
@@ -1033,10 +1030,45 @@ class CopyboardGUI:
                 get_count=core.get_chamber_count,
                 on_eject=self._eject_from_widget,
                 on_capture=self._capture_from_widget,
+                on_dismiss=self._dismiss_widget,
             )
+        return self._widget
+
+    def _prebuild_widget(self) -> None:
+        if not self._closing:
+            try:
+                self._ensure_widget().prebuild()
+            except tk.TclError:
+                pass
+
+    def open_widget(self) -> None:
+        """Collapse the editor into the compact quick-paste plate."""
+        if self._widget is not None and self._widget.is_visible():
+            self._dismiss_widget()
+            return
+
+        self._capture_paste_target()
+        widget = self._ensure_widget()
         self.root.withdraw()
-        self._widget.select(self.selected_index)
-        self._widget.show()
+        widget.select(self.selected_index)
+        at = None
+        if config.get("window", "widget_at_pointer", True):
+            try:
+                at = self.root.winfo_pointerxy()
+            except tk.TclError:
+                at = None
+        widget.show(at=at)
+
+    def _dismiss_widget(self) -> None:
+        """Escape or a second shortcut press: hide the plate and stay hidden.
+
+        If no shortcut can bring the plate back, fall through to the editor
+        so the app never disappears entirely.
+        """
+        if self._widget is not None:
+            self._widget.hide()
+        if self._widget_should_reopen():
+            self._restore_from_widget()
 
     def _describe_widget_item(self, content: str) -> Tuple[str, str, str]:
         kind, mark = classify_clip(content)
