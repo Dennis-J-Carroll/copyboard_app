@@ -59,7 +59,7 @@ This will install the necessary files for Chrome/Chromium and Firefox.
 1. Right-click in any text field
 2. Select "Copyboard > Paste with Radial Menu"
 3. A radial menu will appear with your clipboard items
-4. Click an item to paste it or press the number key (1-9) that corresponds to the item
+4. Click an item to paste it, or press `1`–`9` for chambers 01–09 and `0` for chamber 10
 
 ## Troubleshooting
 

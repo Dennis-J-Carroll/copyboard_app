@@ -61,6 +61,8 @@ DEFAULT_CONFIG = {
         # Chambers in the cylinder: 10–16.  Existing installs keep 10.
         "max_items": 10,
         "auto_capture": True,
+        # Wipe the on-disk history when the editor closes (opt-in privacy).
+        "clear_on_exit": False,
         "show_previews": True,
         "preview_length": 50
     },
@@ -70,6 +72,16 @@ DEFAULT_CONFIG = {
         "context_file": ".copyboard-context.md"
     }
 }
+
+
+def _restrict_permissions(path: str) -> None:
+    """Keep the config readable only by its owner (POSIX)."""
+    if os.name != "posix":
+        return
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
 
 
 class ConfigManager:
@@ -100,6 +112,7 @@ class ConfigManager:
         try:
             with open(CONFIG_FILE, 'w') as f:
                 json.dump(self._config, f, indent=4)
+            _restrict_permissions(CONFIG_FILE)
         except (IOError, OSError) as e:
             print(f"Error saving config: {e}")
 

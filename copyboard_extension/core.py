@@ -54,6 +54,17 @@ _app_clipboard_lock = threading.Lock()
 if not os.path.exists(BOARD_DIR):
     os.makedirs(BOARD_DIR)
 
+
+def _restrict_permissions(path: str) -> None:
+    """Keep the plain-text history readable only by its owner (POSIX)."""
+    if os.name != "posix":
+        return
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
+
+
 def _load_board(force: bool = False) -> List[str]:
     """Load the clipboard board from file only if not already loaded or force=True"""
     global _board, _board_loaded
@@ -99,6 +110,7 @@ def _save_board(force: bool = False) -> None:
         try:
             with open(BOARD_FILE, 'w') as f:
                 json.dump(_board, f)
+            _restrict_permissions(BOARD_FILE)
             _board_modified = False
             _last_saved_time = current_time
             _changes_since_save = 0

@@ -282,6 +282,14 @@ class TestBoardFileCompatibility:
         with open(board_with_config["board_file"]) as fh:
             assert json.load(fh) == ["kept"]
 
+    def test_board_file_is_owner_only_on_posix(self, board_with_config):
+        if os.name != "posix":
+            pytest.skip("POSIX file modes only")
+        board_with_config["add"]("private round")
+        core.force_save()
+        mode = os.stat(board_with_config["board_file"]).st_mode & 0o777
+        assert mode == 0o600
+
 
 # ── Hotkeys: direct chamber shortcuts ─────────────────────────────────────
 class _FakeCore:
@@ -714,6 +722,32 @@ class TestQuickPasteWidgetTk:
         _pump(tk_root, 0.2)
         assert fired == [7]
 
+    def test_ctrl_click_and_c_copy_without_firing(self, tk_root):
+        from copyboard_extension.widget_mode import QuickPasteWidget
+
+        items = [f"r{i}" for i in range(10)]
+        copied, fired = [], []
+        widget = QuickPasteWidget(
+            parent=tk_root,
+            get_items=lambda: list(items),
+            describe_item=lambda text: ("TEXT", "T", text),
+            on_fire=fired.append,
+            on_copy=copied.append,
+            on_restore=lambda: None,
+            get_count=lambda: 10,
+        )
+        widget.show()
+        tk_root.update()
+        x, y = widget._centers[4]
+        widget._on_copy_click(_Event(x=x, y=y))
+        assert copied == [4] and fired == []
+        assert "COPIED 05" in widget.preview_var.get()
+        widget.select(6)
+        widget._on_key(_Event(char="c"))
+        assert copied == [4, 6] and fired == []
+        _pump(tk_root, 0.1)
+        assert fired == []
+
     def test_pin_control_and_p_key_toggle_keep_open(self, tk_root):
         from copyboard_extension.widget_mode import QuickPasteWidget, pin_center
 
@@ -964,3 +998,28 @@ class TestEditorTk:
         calls.clear()
         editor._poll_ui_actions()
         assert calls == []
+
+    def test_copy_from_widget_sets_clipboard_without_pasting(self, editor, monkeypatch, mock_clipboard):
+        from copyboard_extension import paste_helper
+
+        pasted = []
+        monkeypatch.setattr(paste_helper, "paste_current_clipboard", lambda: pasted.append(True))
+        core.copy_to_board("payload")
+        editor.refresh()
+        editor.open_widget()
+        editor.root.update()
+        editor._widget.copy_round(0)
+        _pump(editor.root, 0.2)
+        assert mock_clipboard["content"] == "payload"
+        assert pasted == []
+        assert core.get_board() == ["payload"]
+        assert editor._widget.is_visible() is True
+
+    def test_clear_on_exit_is_opt_in(self, editor, fresh_config):
+        core.copy_to_board("secret")
+        assert fresh_config.get("board", "clear_on_exit") is False
+        editor._persist_on_close()
+        assert core.get_board() == ["secret"]
+        fresh_config.set("board", "clear_on_exit", True)
+        editor._persist_on_close()
+        assert core.get_board() == []

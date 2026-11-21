@@ -27,8 +27,15 @@
 - Flick selection: press anywhere on the dial and drag toward a chamber; the
   chamber you face is highlighted and fired on release, so aiming no longer
   depends on hitting the right chamber before the gesture starts
+- Copy-only firing from the plate: Ctrl/Command-click a chamber or press `C`
+  to put that round on the clipboard without synthesising a paste
 - The paste target is refreshed whenever the pointer enters the plate, so a
   click pastes into the app the pointer came from rather than a stale window
+- Browser extension repair: removed the MV3 service-worker `alert()`, refresh
+  only Copyboard's paste submenu instead of wiping the whole context-menu
+  tree, and label chambers `01`–`16` in menus, the popup and the radial list
+- `widget_mode` and `copyboard_gui` import without tkinter, so their pure
+  helpers and contract tests can run in headless environments
 - Chamber numbering helpers (`copyboard_extension.chambers`) as the single
   conversion point between board indexes and the `01`–`16` labels
 
@@ -45,6 +52,12 @@
 - The 40 ms UI poll no longer queries the foreground window; target capture
   happens on pointer entry and the slower clipboard tick, so a plate left open
   all day no longer spawns ~25 `xdotool`/`osascript` processes per second
+- History privacy: `board.json` and `config.json` are written owner-only
+  (`0600`) on POSIX, and `board.clear_on_exit` wipes the history when the
+  editor closes (**CLEAR ON EXIT** in the footer)
+- Platform metadata and docs now state that Linux is the packaged target while
+  macOS and Windows are source-supported and CI-tested; native Wayland remains
+  unsupported for automatic paste
 - Linux paste keystroke now clears held modifiers (`xdotool --clearmodifiers`)
 
 ## Version 0.5.0 (2026-08-15)

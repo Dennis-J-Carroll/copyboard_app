@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "copyboard-extension"
 version = "0.5.0"
-description = "A ten-chamber clipboard revolver for desktop workflows"
+description = "A 10–16 chamber clipboard revolver for desktop workflows"
 readme = "README.md"
 requires-python = ">=3.9"
 license = {file = "LICENSE"}
@@ -21,6 +21,8 @@ classifiers = [
   "Intended Audience :: End Users/Desktop",
   "License :: OSI Approved :: MIT License",
   "Operating System :: POSIX :: Linux",
+  "Operating System :: MacOS",
+  "Operating System :: Microsoft :: Windows",
   "Programming Language :: Python :: 3",
   "Topic :: Desktop Environment",
   "Topic :: Utilities",

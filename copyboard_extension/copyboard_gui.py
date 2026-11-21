@@ -14,13 +14,21 @@ Responsibilities are split so each stays small:
 * ``paste_helper`` restores the previous window and delivers the paste.
 """
 
+from __future__ import annotations
+
 import math
 import os
 import queue
 import re
 import sys
-import tkinter as tk
-from tkinter import messagebox
+
+try:
+    import tkinter as tk
+    from tkinter import messagebox
+except ImportError:  # headless test environments can still import the pure helpers
+    tk = None  # type: ignore[assignment]
+    messagebox = None  # type: ignore[assignment]
+
 from typing import Dict, Optional, Tuple
 
 import pyperclip
@@ -146,6 +154,9 @@ class CopyboardGUI:
 
         self.auto_capture_var = tk.BooleanVar(
             value=config.get("board", "auto_capture", True)
+        )
+        self.clear_on_exit_var = tk.BooleanVar(
+            value=config.get("board", "clear_on_exit", False)
         )
         self.always_on_top_var = tk.BooleanVar(
             value=config.get("window", "always_on_top", True)
@@ -555,6 +566,21 @@ class CopyboardGUI:
         self.hotkey_state_label.bind("<Button-1>", lambda _event: self.open_shortcuts())
         tk.Checkbutton(
             footer,
+            text="CLEAR ON EXIT",
+            variable=self.clear_on_exit_var,
+            command=self._toggle_clear_on_exit,
+            bg=PANEL_RAISED,
+            activebackground=PANEL_RAISED,
+            fg=TEXT_FAINT,
+            activeforeground=TEXT,
+            selectcolor=PANEL,
+            font=(MONO, 8),
+            cursor="hand2",
+            highlightthickness=0,
+            bd=0,
+        ).pack(side=tk.RIGHT, padx=(0, 10))
+        tk.Checkbutton(
+            footer,
             text="PIN WINDOW",
             variable=self.always_on_top_var,
             command=self._toggle_always_on_top,
@@ -570,7 +596,7 @@ class CopyboardGUI:
         ).pack(side=tk.RIGHT, padx=18)
         tk.Label(
             footer,
-            text="↑ ↓ CYCLE   ENTER COPY   CTRL+ENTER FIRE   DEL EJECT",
+            text="↑ ↓ CYCLE   ENTER COPY   DEL EJECT",
             bg=PANEL_RAISED,
             fg=TEXT_FAINT,
             font=(MONO, 8),
@@ -968,6 +994,17 @@ class CopyboardGUI:
         if self._widget is not None:
             self._widget.flash_message(self.status_var.get(), error="Clipboard" in self.status_var.get())
 
+    def _copy_from_widget(self, index: int) -> bool:
+        """Ctrl+click / C on the plate: copy a round without pasting it."""
+        if self._load_chamber_into_clipboard(index) is None:
+            if self._widget is not None:
+                self._widget.flash_message(self.status_var.get(), error=True)
+            return False
+        self.selected_index = index
+        self._refresh_detail()
+        self._set_status(f"Copied chamber {chamber_label(index)} from widget")
+        return True
+
     # ------------------------------------------------------------------
     # Compact quick-paste widget
     # ------------------------------------------------------------------
@@ -1046,6 +1083,7 @@ class CopyboardGUI:
                 get_count=core.get_chamber_count,
                 on_eject=self._eject_from_widget,
                 on_capture=self._capture_from_widget,
+                on_copy=self._copy_from_widget,
                 on_dismiss=self._dismiss_widget,
                 on_pin_change=self._save_widget_pin,
                 on_pointer_target=self._remember_widget_target,
@@ -1274,6 +1312,15 @@ class CopyboardGUI:
         self._update_capture_state()
         self._set_status(f"Auto-capture {'armed' if enabled else 'paused'}")
 
+    def _toggle_clear_on_exit(self) -> None:
+        enabled = self.clear_on_exit_var.get()
+        config.set("board", "clear_on_exit", enabled)
+        self._set_status(
+            "History will be cleared when CopyBoard closes"
+            if enabled
+            else "History will be kept when CopyBoard closes"
+        )
+
     def _update_capture_state(self) -> None:
         enabled = self.auto_capture_var.get()
         self.capture_state_var.set("CAPTURE ARMED" if enabled else "CAPTURE PAUSED")
@@ -1402,9 +1449,16 @@ class CopyboardGUI:
         config.set("window", "y", self.root.winfo_y())
         config.set("window", "width", self.root.winfo_width())
         config.set("window", "height", self.root.winfo_height())
-        core.force_save()
+        self._persist_on_close()
         hotkeys.unregister_all_hotkeys()
         self.root.destroy()
+
+    def _persist_on_close(self) -> None:
+        """Save the board, or wipe it when the user opted into clearing."""
+        if config.get("board", "clear_on_exit", False):
+            core.clear_board()
+        else:
+            core.force_save()
 
 
 class ShortcutsDialog:
@@ -1423,6 +1477,7 @@ class ShortcutsDialog:
         ("Widget: wheel, ↑ ↓", "Aim at a round (never fires)"),
         ("Widget: press + flick", "Fire the chamber you flick toward"),
         ("Widget: Enter, click", "Fire the aimed round"),
+        ("Widget: Ctrl+click or C", "Copy the aimed round without pasting"),
         ("Widget: Delete ×2", "Eject the aimed round"),
         ("Widget: PIN or P", "Keep the plate on screen between pastes"),
         ("Widget: Esc", "Back to this editor"),

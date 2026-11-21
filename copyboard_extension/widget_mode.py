@@ -12,6 +12,7 @@ Input it understands while visible and under the pointer:
 * ``1``–``9``, ``0`` and two-digit entry (``1`` then ``2``)  – select a chamber
 * arrow keys                                          – move the highlight
 * Return / space                                      – fire the highlighted chamber
+* Ctrl+click a chamber / ``c``                        – copy it without pasting
 * Delete twice                                        – eject the highlighted chamber
 * Escape / right-click / "FULL"                       – restore the editor
 * PIN control or ``p``                                – pin / unpin the plate
@@ -292,6 +293,7 @@ class QuickPasteWidget:
         get_count: Optional[Callable[[], int]] = None,
         on_eject: Optional[Callable[[int], bool]] = None,
         on_capture: Optional[Callable[[], None]] = None,
+        on_copy: Optional[Callable[[int], bool]] = None,
         on_dismiss: Optional[Callable[[], None]] = None,
         on_pin_change: Optional[Callable[[bool], None]] = None,
         on_pointer_target: Optional[Callable[[], None]] = None,
@@ -304,6 +306,7 @@ class QuickPasteWidget:
         self.on_restore = on_restore
         self.on_eject = on_eject
         self.on_capture = on_capture
+        self.on_copy = on_copy
         self._on_dismiss = on_dismiss
         self._on_pin_change = on_pin_change
         self._on_pointer_target = on_pointer_target
@@ -808,6 +811,10 @@ class QuickPasteWidget:
         self.canvas.bind("<ButtonPress-1>", self._on_press)
         self.canvas.bind("<B1-Motion>", self._on_round_drag)
         self.canvas.bind("<ButtonRelease-1>", self._on_release)
+        # Ctrl/Command-click is copy-only: the round reaches the clipboard
+        # without a synthesised paste and without leaving the plate.
+        self.canvas.bind("<Control-Button-1>", self._on_copy_click)
+        self.canvas.bind("<Command-Button-1>", self._on_copy_click)
         # Wheel selection is bound to the canvas only: it works while the
         # pointer is over the widget and never touches other applications.
         self.canvas.bind("<MouseWheel>", self._on_wheel)
@@ -844,6 +851,13 @@ class QuickPasteWidget:
 
     def _on_pointer_enter(self, _event) -> None:
         self._report_pointer_target()
+
+    def _on_copy_click(self, event) -> str:
+        """Ctrl/Command-click: copy the chamber under the pointer, no paste."""
+        index = self._chamber_at(event.x, event.y)
+        if index is not None:
+            self.copy_round(index)
+        return "break"
 
     def _on_motion(self, event) -> None:
         hovered = self._chamber_at(event.x, event.y)
@@ -993,6 +1007,8 @@ class QuickPasteWidget:
                 self.select(index)
         elif char.lower() == "p":
             self.toggle_pin()
+        elif char.lower() == "c":
+            self.copy_selected()
 
     def capture_clipboard(self) -> None:
         """COPY tab: ask the host to load the current clipboard into chamber 01."""
@@ -1002,6 +1018,25 @@ class QuickPasteWidget:
         self.on_capture()
         self._selected = 0
         self.redraw()
+
+    def copy_round(self, index: int) -> None:
+        """Copy a chamber to the clipboard without firing or pasting it."""
+        if index >= len(self.get_items()):
+            self.flash_message(f"Chamber {chamber_label(index)} is empty", error=True)
+            return
+        if self.on_copy is None:
+            self.flash_message("Copy is not available here", error=True)
+            return
+        self._selected = index
+        copied = self.on_copy(index)
+        self.redraw()
+        if copied is False:
+            return  # the host already explained why the clipboard write failed
+        self.flash_message(f"COPIED {chamber_label(index)}  /  NO PASTE")
+
+    def copy_selected(self) -> None:
+        """Copy the highlighted chamber to the clipboard (keyboard ``c``)."""
+        self.copy_round(self._selected)
 
     def fire_selected(self) -> None:
         """Fire the highlighted chamber (keyboard path or PASTE tab)."""

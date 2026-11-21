@@ -19,6 +19,17 @@ The Linux release currently targets X11. Clipboard history and copy-only
 features remain usable under XWayland, but automatic focus restoration and
 pasting depend on `xdotool` and may be limited in native Wayland sessions.
 
+| Platform | Support | Automatic paste |
+| --- | --- | --- |
+| Linux (X11) | Packaged `.deb` / AppImage | `xdotool` + `xclip` |
+| Linux (Wayland) | Source only, via XWayland | Limited; native Wayland is not supported |
+| macOS | Source, CI-tested | Requires Accessibility permission for `osascript` |
+| Windows | Source, CI-tested | Needs `pywin32` (see below) |
+
+macOS and Windows are not packaged yet; run them from a clone with the
+commands under **Run the desktop app**. CI exercises the Python test suite on
+all three platforms.
+
 Ever had to bounce between tabs or windows just to gather a handful of things
 you'd copied? CopyBoard fixes that: instead of one item overwriting your
 clipboard every time, you get a revolver of 10–16 chambers holding everything
@@ -42,7 +53,8 @@ you've recently copied, ready to fire back out whenever you need it.
 - Deliberate edit, eject, resize, and clear — nothing is deleted by pasting
 - Combine chambers, file-manager integration, browser extension
 - Local and offline; history lives in a plain JSON file you can read or delete
-- Cross-platform (Linux, macOS, Windows)
+- Cross-platform source support; Linux is the packaged target, while macOS
+  and Windows run from source
 
 ## Run the desktop app
 
@@ -93,6 +105,7 @@ paste so the app can always be reached.
 | `1`–`9`, `0`, or two quick digits (`1` then `4` = 14) | Aim by chamber number |
 | Click a chamber, **PASTE** tab, `Enter`, `Space` | Fire the aimed round |
 | Press, flick toward a chamber, release | Fire the chamber you flick toward |
+| `Ctrl`/`Command`+click a chamber, or `C` | Copy the aimed round without pasting |
 | **COPY** tab | Load the current clipboard into chamber 01 |
 | **PIN** or `P` | Keep the plate on screen between pastes; click again to unpin |
 | `Delete` twice | Eject the aimed round (first press only arms it) |
@@ -121,6 +134,7 @@ local and offline.
 | --- | --- | --- |
 | `board.max_items` | `10` | Chambers in the cylinder, 10–16. Older values outside that range are clamped once on launch. |
 | `board.auto_capture` | `true` | Load new external copies into chamber 01 |
+| `board.clear_on_exit` | `false` | Wipe `board.json` when the editor closes (also toggled with **CLEAR ON EXIT**) |
 | `window.widget_at_pointer` | `true` | Open the plate under the mouse pointer instead of its saved spot |
 | `window.widget_reopen_after_fire` | `false` | Bring the plate back after every paste (always true when no shortcut can reopen it) |
 | `window.widget_pinned` | `false` | Start and keep the plate on screen: a fire leaves it open and it does not take focus from the app being pasted into |
@@ -156,6 +170,8 @@ python3 scripts/install_system_wide.py
 
 #### macOS
 
+No installer is produced for macOS; these commands run it from source.
+
 ```bash
 # Install dependencies
 brew install python3
@@ -168,6 +184,8 @@ python3 scripts/install_system_wide.py
 ```
 
 #### Windows
+
+No installer is produced for Windows; these commands run it from source.
 
 ```bash
 # Install Python from python.org
@@ -247,9 +265,12 @@ Then load the unpacked extension from the `copyboard_extension/browser_extension
 ## How It Works
 
 Copyboard keeps the history as a plain JSON list of strings in
-`~/.config/copyboard/board.json`. A new copy goes to the front of the list, so
-chamber 01 is list index 0. The CLI and Python API use those zero-based
-indexes; the desktop app shows the one-based chamber labels 01–16.
+`~/.config/copyboard/board.json`. On POSIX systems the file and the config are
+written owner-only (`0600`); there is no automatic expiry, so use **CLEAR ON
+EXIT**, **CLEAR ALL**, or delete the file when you need the history gone. A new
+copy goes to the front of the list, so chamber 01 is list index 0. The CLI and
+Python API use those zero-based indexes; the desktop app shows the one-based
+chamber labels 01–16.
 
 The extension can run in multiple modes:
 1. **GUI mode** - A graphical interface for easy interaction

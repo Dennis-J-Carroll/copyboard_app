@@ -52,7 +52,7 @@ function addItemToList(text, index) {
   // Create item number
   const itemNumber = document.createElement('div');
   itemNumber.className = 'item-number';
-  itemNumber.textContent = index;
+  itemNumber.textContent = String(index + 1).padStart(2, '0');
   item.appendChild(itemNumber);
   
   // Create item text

@@ -253,7 +253,7 @@ function createRadialMenu(overlay, items) {
     // Add items
     items.forEach((item, index) => {
       const itemElem = document.createElement('div');
-      itemElem.textContent = `${index}: ${truncateText(item, 50)}`;
+      itemElem.textContent = `${String(index + 1).padStart(2, '0')}  ${truncateText(item, 50)}`;
       itemElem.style.padding = '8px 15px';
       itemElem.style.cursor = 'pointer';
       itemElem.style.borderRadius = '5px';
@@ -285,13 +285,14 @@ function createRadialMenu(overlay, items) {
     menu.appendChild(itemsContainer);
     overlay.appendChild(menu);
     
-    // Add keyboard handling
+    // Add keyboard handling: 1–9 pick chambers 01–09, 0 picks chamber 10.
     document.addEventListener('keydown', function keyHandler(e) {
-      // Handle number keys 0-9
-      const num = parseInt(e.key);
-      if (!isNaN(num) && num >= 0 && num < items.length) {
-        log('Item selected via keyboard: ' + num);
-        pasteContent(items[num]);
+      if (!/^[0-9]$/.test(e.key)) return;
+      const number = parseInt(e.key, 10);
+      const itemIndex = number === 0 ? 9 : number - 1;
+      if (itemIndex >= 0 && itemIndex < items.length) {
+        log('Item selected via keyboard: ' + itemIndex);
+        pasteContent(items[itemIndex]);
         document.body.removeChild(overlay);
         document.removeEventListener('keydown', keyHandler);
       }
