@@ -9,6 +9,9 @@ import subprocess
 import shutil
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from extension_id import chrome_extension_id_from_manifest
+
 def print_colored(text, color):
     """Print colored text."""
     colors = {
@@ -49,6 +52,14 @@ def fix_native_messaging_host():
     # Get the base directory
     base_dir = os.path.dirname(os.path.abspath(__file__))
     project_root = os.path.dirname(base_dir)  # Move up one level from scripts directory
+
+    # A hard-coded ID stops matching as soon as the manifest key changes, and
+    # Chrome then refuses every native message, so derive it from the key.
+    try:
+        extension_origin = "chrome-extension://%s/" % chrome_extension_id_from_manifest(project_root)
+    except (OSError, ValueError) as e:
+        print_error(f"Could not derive the Chrome extension ID: {e}")
+        return False
     
     # Chrome manifest path
     chrome_dir = os.path.expanduser("~/.config/google-chrome/NativeMessagingHosts")
@@ -78,10 +89,7 @@ def fix_native_messaging_host():
             "description": "Copyboard Native Messaging Host",
             "path": host_script_path if os.path.exists(host_script_path) else simple_host_path,
             "type": "stdio",
-            "allowed_origins": [
-                "chrome-extension://clioppbhoiokpphkobjjkfchcdfaafdn/",
-                "chrome://extensions/"
-            ]
+            "allowed_origins": [extension_origin]
         }
     
     # Update the host path
@@ -98,6 +106,10 @@ def fix_native_messaging_host():
     # Make the script executable
     os.chmod(manifest["path"], 0o755)
     print_success("Made host script executable")
+
+    # Never trust an ID baked into the template: the derived origin is the only
+    # one this extension can present.
+    manifest["allowed_origins"] = [extension_origin]
     
     # Save the manifest
     try:
@@ -175,12 +187,9 @@ def main():
     print_info("2. Enable Developer mode (toggle in the top-right)")
     print_info("3. Click 'Load unpacked' and select the following directory:")
     print_info(f"   {os.path.join(os.path.dirname(os.path.abspath(__file__)), 'copyboard_extension', 'browser_extension')}")
-    print_info("4. Note the extension ID that appears under the extension name")
-    print_info("5. Make sure this ID matches the one in your native messaging host manifest:")
-    print_info(f"   {os.path.expanduser('~/.config/google-chrome/NativeMessagingHosts/com.copyboard.extension.json')}")
-    print_info("6. If they don't match, run this script again with the correct ID:")
-    print_info("   python3 fix_extension.py <extension_id>")
-    print_info("7. Restart Chrome completely (close all windows and reopen)")
+    print_info("4. The host manifest already allows the ID derived from")
+    print_info("   browser_extension/manifest.json")
+    print_info("5. Restart Chrome completely (close all windows and reopen)")
     
     print_header("TROUBLESHOOTING")
     print_info("If you still have issues:")

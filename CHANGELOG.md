@@ -47,6 +47,10 @@
 - Dismissing the radial menu (Escape, backdrop click or a chamber pick) now
   detaches its keyboard handler, so a later digit press no longer throws
   inside the content script
+- Every install path (`install_browser_extension`, `fix_extension`,
+  `install_system_wide`, and the `config/chrome_manifest.json` template)
+  derives the Chrome extension ID from `browser_extension/manifest.json`
+  instead of carrying a stale hard-coded ID that Chrome rejects
 
 ### Changed
 - Firing or pasting a chamber is read-only for the cylinder; CopyBoard's own

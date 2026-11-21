@@ -3,7 +3,5 @@
   "description": "Copyboard Native Messaging Host",
   "path": "/home/dennisjcarroll/CascadeProjects/windsurf-project/copyboard_extension/simple_host.py",
   "type": "stdio",
-  "allowed_origins": [
-    "chrome-extension://clioppbhoiokpphkobjjkfchcdfaafdn/"
-  ]
+  "allowed_origins": []
 }

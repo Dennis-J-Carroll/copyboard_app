@@ -4,9 +4,13 @@ The extension is shipped twice (the standalone ``browser_extension`` folder
 and the copy under ``copyboard_extension``), so these tests also keep the two
 copies byte-identical.
 """
+import base64
 import filecmp
+import hashlib
+import importlib.util
 import json
 import os
+import re
 import struct
 import subprocess
 import sys
@@ -48,6 +52,42 @@ def test_paste_refresh_does_not_wipe_the_whole_menu_tree():
     assert 'contextMenus.remove("copyboard-paste"' in source
     menu_click_handler = source.split("chrome.contextMenus.onClicked", 1)[1]
     assert "contextMenus.removeAll" not in menu_click_handler
+
+
+def load_script_module(name: str, filename: str):
+    path = os.path.join(PROJECT_ROOT, "scripts", filename)
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def expected_extension_id() -> str:
+    manifest = json.loads(read_extension("manifest.json"))
+    digest = hashlib.sha256(base64.b64decode(manifest["key"])).hexdigest()[:32]
+    return "".join(chr(ord("a") + int(nibble, 16)) for nibble in digest)
+
+
+def test_installers_derive_the_extension_id_from_the_manifest_key():
+    module = load_script_module("extension_id", "extension_id.py")
+    assert module.chrome_extension_id_from_manifest(PROJECT_ROOT) == expected_extension_id()
+
+
+def test_system_wide_installer_allows_the_derived_origin():
+    module = load_script_module("install_system_wide", "install_system_wide.py")
+    manifest = module.build_native_host_manifest("/tmp/copyboard-native-host")
+    assert manifest["allowed_origins"] == ["chrome-extension://%s/" % expected_extension_id()]
+
+
+def test_install_paths_do_not_hard_code_an_extension_id():
+    hard_coded = re.compile(r"chrome-extension://[a-p]{32}")
+    for relative in (
+        "config/chrome_manifest.json",
+        "scripts/fix_extension.py",
+        "scripts/install_system_wide.py",
+    ):
+        with open(os.path.join(PROJECT_ROOT, relative), encoding="utf-8") as handle:
+            assert hard_coded.search(handle.read()) is None, relative
 
 
 def test_native_host_runs_as_a_script(tmp_path):

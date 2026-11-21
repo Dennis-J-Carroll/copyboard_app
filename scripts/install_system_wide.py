@@ -18,6 +18,28 @@ import json
 import platform
 from pathlib import Path
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from extension_id import chrome_extension_id_from_manifest
+
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def build_native_host_manifest(host_path):
+    """Build a Chrome native messaging manifest for the unpacked extension.
+
+    The ID comes from browser_extension/manifest.json, so no installer can
+    ship a manifest that Chrome rejects.
+    """
+    return {
+        "name": "com.copyboard.extension",
+        "description": "Copyboard Native Messaging Host",
+        "path": host_path,
+        "type": "stdio",
+        "allowed_origins": [
+            "chrome-extension://%s/" % chrome_extension_id_from_manifest(PROJECT_ROOT)
+        ],
+    }
+
 def get_platform():
     """Detect the current platform"""
     system = platform.system().lower()
@@ -162,15 +184,7 @@ def install_macos():
         firefox_dir.mkdir(parents=True, exist_ok=True)
         
         # Create manifest
-        manifest = {
-            "name": "com.copyboard.extension",
-            "description": "Copyboard Native Messaging Host",
-            "path": "/usr/local/bin/copyboard-native-host",
-            "type": "stdio",
-            "allowed_origins": [
-                "chrome-extension://clioppbhoiokpphkobjjkfchcdfaafdn/"
-            ]
-        }
+        manifest = build_native_host_manifest("/usr/local/bin/copyboard-native-host")
         
         # Write manifest files
         with open(chrome_dir / "com.copyboard.extension.json", "w") as f:
@@ -252,15 +266,7 @@ def install_windows():
         chrome_dir.mkdir(parents=True, exist_ok=True)
         
         # Create manifest
-        manifest = {
-            "name": "com.copyboard.extension",
-            "description": "Copyboard Native Messaging Host",
-            "path": os.path.abspath("bin/copyboard-native-host.exe"),
-            "type": "stdio",
-            "allowed_origins": [
-                "chrome-extension://clioppbhoiokpphkobjjkfchcdfaafdn/"
-            ]
-        }
+        manifest = build_native_host_manifest(os.path.abspath("bin/copyboard-native-host.exe"))
         
         # Write manifest file
         with open(chrome_dir / "com.copyboard.extension.json", "w") as f:
