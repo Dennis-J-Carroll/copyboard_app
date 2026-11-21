@@ -7,12 +7,14 @@ import time
 import pytest
 
 from copyboard_extension.clipboard_watcher import (
+    FALLBACK_INTERVAL_S,
     BackendUnavailable,
     ClipboardBackend,
     ClipboardWatcher,
     PollingBackend,
     detect_backend_kind,
 )
+from copyboard_extension.native_clipboard import NativeReadUnavailable
 
 
 class FakeBackend:
@@ -188,6 +190,66 @@ def test_watcher_uses_explicit_polling_backend():
     assert watcher.backend_name == "polling"
     assert watcher.event_driven is False
     watcher.stop()
+
+
+def test_polling_fallback_runs_every_250ms():
+    assert FALLBACK_INTERVAL_S == 0.25
+    backend = PollingBackend(lambda _change: None, lambda: "")
+    assert backend.interval == 0.25
+
+
+def test_watcher_uses_an_in_process_reader_for_native_backends(monkeypatch):
+    native = lambda: "native text"
+    native.name = "fake-native"
+    monkeypatch.setattr(
+        "copyboard_extension.clipboard_watcher.create_native_reader",
+        lambda kind: native if kind == "x11" else None,
+    )
+
+    watcher = ClipboardWatcher(lambda _change: None, backend_kind="x11")
+
+    assert watcher.reader_name == "fake-native"
+    assert watcher._read_clipboard() == "native text"
+
+
+def test_watcher_keeps_an_explicit_reader():
+    reader = lambda: "explicit"
+
+    watcher = ClipboardWatcher(
+        lambda _change: None, backend_kind="x11", read_clipboard=reader
+    )
+
+    assert watcher.reader_name == "custom"
+    assert watcher._read_clipboard is reader
+
+
+def test_watcher_uses_pyperclip_when_there_is_no_native_reader(monkeypatch):
+    monkeypatch.setattr(
+        "copyboard_extension.clipboard_watcher.create_native_reader",
+        lambda _kind: None,
+    )
+
+    watcher = ClipboardWatcher(lambda _change: None, backend_kind="polling")
+
+    assert watcher.reader_name == "pyperclip"
+
+
+def test_native_read_failure_falls_back_to_pyperclip(monkeypatch):
+    def broken():
+        raise NativeReadUnavailable("the display went away")
+
+    monkeypatch.setattr(
+        "copyboard_extension.clipboard_watcher.create_native_reader",
+        lambda _kind: broken,
+    )
+    monkeypatch.setattr(
+        "copyboard_extension.clipboard_watcher.pyperclip.paste",
+        lambda: "fallback text",
+    )
+
+    watcher = ClipboardWatcher(lambda _change: None, backend_kind="x11")
+
+    assert watcher._read_clipboard() == "fallback text"
 
 
 @pytest.mark.parametrize("kind", ["wayland", "x11", "windows", "macos"])

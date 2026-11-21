@@ -1330,6 +1330,7 @@ class CopyboardGUI:
                 "watcher_started",
                 backend=self._watcher.backend_name,
                 event_driven=self._watcher.event_driven,
+                reader=self._watcher.reader_name,
                 fallback=self._watcher.fallback_reason or "",
             )
         except Exception as exc:

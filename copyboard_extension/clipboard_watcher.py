@@ -11,8 +11,10 @@ Native backends:
 * ``windows`` uses ``AddClipboardFormatListener`` in a message-only window.
 * ``macos`` uses NSPasteboard's native change counter when PyObjC is present.
 
-Every other case, and every failure, uses ``polling`` at the legacy 650 ms
-cadence.  Clipboard text is passed to the callback and is never logged here.
+Every other case, and every failure, uses ``polling`` at a 250 ms cadence.
+Native event backends read the clipboard in-process, so a copy does not start
+``xclip``/``xsel``/``pbpaste``.  Clipboard text is passed to the callback and
+is never logged here.
 """
 
 from __future__ import annotations
@@ -32,9 +34,11 @@ from typing import Any, Callable, Dict, Optional
 
 import pyperclip
 
+from .native_clipboard import create_native_reader
+
 LOGGER = logging.getLogger(__name__)
 
-FALLBACK_INTERVAL_S = 0.65
+FALLBACK_INTERVAL_S = 0.25
 WAYLAND_DEBOUNCE_S = 0.02
 _UNSET = object()
 
@@ -143,6 +147,11 @@ class PollingBackend(ClipboardBackend):
         self._thread: Optional[threading.Thread] = None
         self._primed = initial_text is not _UNSET
         self._last: Any = initial_text if self._primed else object()
+
+    @property
+    def interval(self) -> float:
+        """Seconds between fallback polls (for diagnostics and tests)."""
+        return self._interval
 
     def start(self) -> None:
         if self._thread is not None and self._thread.is_alive():
@@ -781,6 +790,32 @@ def create_backend(
     raise BackendUnavailable(f"unknown clipboard backend: {kind}")
 
 
+class _ReaderWithFallback:
+    """Use an in-process reader, but never lose a copy to a failed read.
+
+    A native read can fail transiently (a slow selection owner, a locked
+    clipboard, a display restart).  Falling back to ``pyperclip`` for that one
+    event keeps capture working; the warning is logged once so a persistent
+    failure does not flood the log.
+    """
+
+    def __init__(self, native: Callable[[], str]) -> None:
+        self._native = native
+        self.name = getattr(native, "name", "native")
+        self._warned = False
+
+    def __call__(self) -> Any:
+        try:
+            return self._native()
+        except Exception as exc:
+            if not self._warned:
+                LOGGER.warning(
+                    "Native clipboard read failed (%s); using pyperclip", exc
+                )
+                self._warned = True
+            return pyperclip.paste()
+
+
 class ClipboardWatcher:
     """Own one clipboard backend and fall back safely when it fails."""
 
@@ -795,7 +830,6 @@ class ClipboardWatcher:
         initial_text: Any = _UNSET,
     ) -> None:
         self._on_change = on_change
-        self._read_clipboard = read_clipboard or pyperclip.paste
         self._initial_text = initial_text
         self._lock = threading.Lock()
         self._started = False
@@ -814,11 +848,14 @@ class ClipboardWatcher:
 
         self._fallback_factory = fallback_factory or make_fallback
         self._backend: Optional[ClipboardBackend] = None
+        kind = backend_kind or detect_backend_kind()
+        self._read_clipboard, self._reader_name = self._select_reader(
+            read_clipboard, kind
+        )
         if backend is not None:
             self._backend = backend
             return
 
-        kind = backend_kind or detect_backend_kind()
         try:
             self._backend = create_backend(
                 kind,
@@ -846,6 +883,26 @@ class ClipboardWatcher:
     @property
     def fallback_reason(self) -> Optional[str]:
         return self._fallback_reason
+
+    @property
+    def reader_name(self) -> str:
+        """How the event path reads clipboard text (native, pyperclip, custom)."""
+        return self._reader_name
+
+    @staticmethod
+    def _select_reader(
+        read_clipboard: Optional[Callable[[], Any]], kind: str
+    ):
+        if read_clipboard is not None:
+            return read_clipboard, "custom"
+        try:
+            native = create_native_reader(kind)
+        except Exception as exc:
+            LOGGER.warning("Could not create a native clipboard reader: %s", exc)
+            native = None
+        if native is None:
+            return pyperclip.paste, "pyperclip"
+        return _ReaderWithFallback(native), getattr(native, "name", "native")
 
     def start(self) -> None:
         backend = self._backend

@@ -12,8 +12,9 @@ Linux desktop releases are available from the
 - **Debian package (`.deb`)** — recommended for Ubuntu, Debian, and Linux Mint.
   Double-click the download to install CopyBoard in the application menu.
 - **AppImage** — portable release for other x86-64 Linux distributions. Make
-  it executable once, then double-click it to run. Automatic capture and paste
-  still require the host system to provide `xclip` and `xdotool`.
+  it executable once, then double-click it to run. Capture reads the X11
+  selection directly; copying a chamber and automatic paste still require the
+  host system to provide `xclip` and `xdotool`.
 
 The Linux release currently targets X11. Clipboard history and copy-only
 features remain usable under XWayland, but automatic focus restoration and
@@ -21,7 +22,7 @@ pasting depend on `xdotool` and may be limited in native Wayland sessions.
 
 | Platform | Support | Automatic paste |
 | --- | --- | --- |
-| Linux (X11) | Packaged `.deb` / AppImage | `xdotool` + `xclip` |
+| Linux (X11) | Packaged `.deb` / AppImage | `xdotool` + `xclip` (capture reads X11 directly) |
 | Linux (Wayland) | Source only, via XWayland | Limited; native Wayland is not supported |
 | macOS | Source, CI-tested | Requires Accessibility permission for `osascript` |
 | Windows | Source, CI-tested | Needs `pywin32` (see below) |

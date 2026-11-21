@@ -6,7 +6,11 @@
 - Event-driven clipboard capture: XFixes selection events on X11,
   `wl-paste --watch` on Wayland, `AddClipboardFormatListener` on Windows, and
   a native change counter on macOS when PyObjC is present; every backend falls
-  back safely to the 650 ms poller when it is unavailable or dies at runtime
+  back safely to the 250 ms poller when it is unavailable or dies at runtime
+- In-process clipboard reads on the native event path: X11
+  `ConvertSelection` (including INCR transfers), Win32 `GetClipboardData`, and
+  `NSPasteboard` on macOS, so a capture no longer starts `xclip`/`xsel`; a
+  failed native read falls back to `pyperclip` for that event
 - Content-free capture and fire latency traces, with per-stage percentiles and
   a private `~/.config/copyboard/latency.jsonl` log (stage, duration, backend,
   character count — never clipboard text)
