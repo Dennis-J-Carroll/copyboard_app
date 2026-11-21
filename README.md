@@ -150,16 +150,13 @@ home-screen widgets are a secondary quick-access surface. See
 [`docs/CROSS_PLATFORM_QUICK_PASTE.md`](docs/CROSS_PLATFORM_QUICK_PASTE.md) for
 the platform methodology and delivery sequence.
 
-On Linux, automatic paste requires `xdotool` on X11. Copy-only and clipboard
-history remain available without it.
-
 ### Platform-Specific Installation
 
 #### Linux
 
 ```bash
 # Install dependencies
-sudo apt install xdotool xclip python3-tk python3-pip
+sudo apt install xdotool xclip libxfixes3 wl-clipboard python3-tk python3-pip
 
 # Install Copyboard
 pip install copyboard-extension
@@ -195,6 +192,15 @@ pip install copyboard-extension pywin32
 # Install system-wide
 python scripts/install_system_wide.py
 ```
+
+## Clipboard capture and diagnostics
+
+On Linux, automatic paste requires `xdotool` on X11. Copy-only and clipboard
+history remain available without it. Clipboard capture uses XFixes events on
+X11 (install `libxfixes3`); on Wayland it uses `wl-paste --watch` when
+`wl-clipboard` is installed. If neither native path is available, CopyBoard
+falls back to polling. Capture and fire timings are written without clipboard
+content to `~/.config/copyboard/latency.jsonl` for diagnosis.
 
 ## Usage
 

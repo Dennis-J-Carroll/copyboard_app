@@ -40,6 +40,8 @@ if parent_dir not in sys.path:
 
 try:
     from . import core, hotkeys, paste_helper
+    from .clipboard_watcher import ClipboardWatcher
+    from .latency import LatencyRecorder
     from .chambers import (
         MAX_CHAMBERS,
         MIN_CHAMBERS,
@@ -77,8 +79,10 @@ MONO = "DejaVu Sans Mono"
 # synthesising the paste keystroke.
 FIRE_FOCUS_DELAY_MS = 90
 FIRE_PASTE_DELAY_MS = 140
-UI_ACTION_POLL_MS = 40   # how quickly a global shortcut reaches the Tk thread
-# Clipboard poll ticks (650 ms each) between foreground-window captures.
+UI_ACTION_POLL_MS = 16   # how quickly a watcher change or shortcut reaches Tk
+# Foreground-window queries are deliberately slower than clipboard capture:
+# they can spawn a helper process, while the watcher itself is event-driven.
+TARGET_POLL_MS = 650
 TARGET_POLL_TICKS = 3 if paste_helper.get_platform() == "macos" else 1
 
 
@@ -151,6 +155,11 @@ class CopyboardGUI:
         self._ui_actions: queue.SimpleQueue = queue.SimpleQueue()
         self._dial = ChamberDial(core.get_chamber_count)
         self._hotkey_report: Dict[str, str] = {}
+        self._latency = LatencyRecorder(
+            log_path=os.path.join(core.BOARD_DIR, "latency.jsonl")
+        )
+        core.set_latency_recorder(self._latency)
+        self._watcher: Optional[ClipboardWatcher] = None
 
         self.auto_capture_var = tk.BooleanVar(
             value=config.get("board", "auto_capture", True)
@@ -185,7 +194,8 @@ class CopyboardGUI:
         if config.get("window", "widget_pinned", False):
             self.root.withdraw()
         self._update_capture_state()
-        self._schedule_clipboard_poll()
+        self._start_clipboard_watcher()
+        self._schedule_target_poll()
         self._schedule_ui_action_poll()
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         # Build the quick-paste plate once the editor is up so the first
@@ -887,6 +897,7 @@ class CopyboardGUI:
         self.editor.edit_reset()
 
     def capture_current(self) -> None:
+        started = self._latency.mark("manual_capture_requested")
         try:
             content = pyperclip.paste()
         except pyperclip.PyperclipException as exc:
@@ -898,6 +909,9 @@ class CopyboardGUI:
         self._last_clipboard = content
         core.copy_to_board(content)
         self.refresh(select_newest=True)
+        self._latency.record(
+            "manual_capture_to_chamber", started, chars=len(content)
+        )
         self._set_status("Current clipboard loaded into chamber 01")
 
     def _load_chamber_into_clipboard(self, index: int) -> Optional[str]:
@@ -926,17 +940,29 @@ class CopyboardGUI:
     def fire_selected(self) -> None:
         """Fire & Hide: hide the editor, return focus to the previous app, paste."""
         index = self.selected_index
+        started = self._latency.mark("fire_requested")
         if self._load_chamber_into_clipboard(index) is None:
             return
+        self._latency.record(
+            "fire_clipboard_written", started, index=index, source="editor"
+        )
         target = self._paste_target
         self._set_status(f"Firing chamber {chamber_label(index)}")
         self.root.iconify()
         self.root.after(
-            FIRE_FOCUS_DELAY_MS, lambda: self._deliver_fire(index, target, from_widget=False)
+            FIRE_FOCUS_DELAY_MS,
+            lambda: self._deliver_fire(
+                index, target, from_widget=False, trace_start_ns=started
+            ),
         )
 
     def _deliver_fire(
-        self, index: int, target, from_widget: bool, keep_open: bool = False
+        self,
+        index: int,
+        target,
+        from_widget: bool,
+        keep_open: bool = False,
+        trace_start_ns: Optional[int] = None,
     ) -> None:
         """Restore the previous window and paste, or fall back visibly.
 
@@ -950,8 +976,15 @@ class CopyboardGUI:
         """
         if self._closing:
             return
+        started = trace_start_ns or self._latency.mark("fire_requested")
+        source = "widget" if from_widget else "editor"
         if target is not None and paste_helper.restore_active_window(target):
-            self.root.after(FIRE_PASTE_DELAY_MS, paste_helper.paste_current_clipboard)
+            self._latency.record(
+                "fire_focus_restored", started, index=index, source=source
+            )
+            self.root.after(
+                FIRE_PASTE_DELAY_MS, lambda: self._paste_traced(index, started)
+            )
             self._set_status(f"Fired chamber {chamber_label(index)}")
             if keep_open and self._widget is not None and self._widget.is_visible():
                 self.root.after(
@@ -962,6 +995,7 @@ class CopyboardGUI:
                 self.root.after(FIRE_PASTE_DELAY_MS + 280, self._reshow_widget)
             return
 
+        self._latency.record("fire_focus_failed", started, index=index, source=source)
         message = focus_fallback_message(index, paste_helper.get_platform())
         if from_widget and self._widget is not None:
             if not self._widget.is_visible():
@@ -971,6 +1005,13 @@ class CopyboardGUI:
             self.root.deiconify()
             self.root.lift()
         self._set_status(message, error=True)
+
+    def _paste_traced(self, index: int, started: int) -> None:
+        """Dispatch the paste and record the full fire-to-keystroke span."""
+        ok = paste_helper.paste_current_clipboard()
+        self._latency.record(
+            "fire_to_paste_dispatch", started, index=index, ok=bool(ok)
+        )
 
     def _widget_should_reopen(self) -> bool:
         """Let go and it's gone — unless nothing else could bring it back.
@@ -1033,9 +1074,9 @@ class CopyboardGUI:
         except queue.Empty:
             pass
         # The paste target is captured when the pointer reaches the plate and
-        # on the slower clipboard tick.  Querying the foreground window on
-        # this 40 ms loop meant ~25 subprocesses a second on a visible plate —
-        # unacceptable for one that can now stay open all day.
+        # on the slower target tick.  Querying the foreground window on this
+        # loop meant ~25 subprocesses a second on a visible plate — unacceptable
+        # for one that can now stay open all day.
         self._schedule_ui_action_poll()
 
     def _handle_ui_action(self, action) -> None:
@@ -1055,6 +1096,11 @@ class CopyboardGUI:
                     f"Chamber {chamber_label(index)} is empty — nothing to fire",
                     error=True,
                 )
+        elif isinstance(action, tuple) and action and action[0] == "clipboard":
+            _tag, text, observed_at_ns, backend = action
+            self._observe_clipboard(
+                text, observed_at_ns=observed_at_ns, backend=backend
+            )
 
     def _copyboard_unfocused(self) -> bool:
         try:
@@ -1185,11 +1231,15 @@ class CopyboardGUI:
 
     def _fire_from_widget(self, index: int) -> None:
         """Widget command: paste chamber ``index`` into the previous app."""
+        started = self._latency.mark("fire_requested")
         self._remember_widget_target()
         if self._load_chamber_into_clipboard(index) is None:
             if self._widget is not None:
                 self._widget.flash_message(self.status_var.get(), error=True)
             return
+        self._latency.record(
+            "fire_clipboard_written", started, index=index, source="widget"
+        )
         self.selected_index = index
         self._refresh_detail()
         self._set_status(f"Firing chamber {chamber_label(index)} from widget")
@@ -1197,7 +1247,13 @@ class CopyboardGUI:
         keep_open = bool(self._widget is not None and self._widget.pinned)
         if self._widget is not None and not keep_open:
             self._widget.hide()
-        self._deliver_fire(index, target, from_widget=True, keep_open=keep_open)
+        self._deliver_fire(
+            index,
+            target,
+            from_widget=True,
+            keep_open=keep_open,
+            trace_start_ns=started,
+        )
 
     def _eject_from_widget(self, index: int) -> bool:
         """Widget command: eject ``index`` after the widget's double-Delete."""
@@ -1261,34 +1317,76 @@ class CopyboardGUI:
     # ------------------------------------------------------------------
     # Monitoring, settings, and keyboard
     # ------------------------------------------------------------------
-    def _schedule_clipboard_poll(self) -> None:
-        self._poll_job = self.root.after(650, self._poll_clipboard)
-
-    def _poll_clipboard(self) -> None:
+    def _start_clipboard_watcher(self) -> None:
+        """Start native clipboard watching, or its polling fallback."""
         if self._closing:
             return
         try:
-            current = pyperclip.paste()
-            self._observe_clipboard(current)
-        except pyperclip.PyperclipException:
-            pass
+            self._watcher = ClipboardWatcher(
+                self._on_clipboard_change, initial_text=self._last_clipboard
+            )
+            self._watcher.start()
+            self._latency.event(
+                "watcher_started",
+                backend=self._watcher.backend_name,
+                event_driven=self._watcher.event_driven,
+                fallback=self._watcher.fallback_reason or "",
+            )
+        except Exception as exc:
+            # ClipboardWatcher normally handles this itself.  This is the last
+            # guard so a damaged platform library can never stop the GUI.
+            self._watcher = None
+            self._latency.event("watcher_unavailable", error=str(exc))
+
+    def _stop_clipboard_watcher(self) -> None:
+        watcher = self._watcher
+        self._watcher = None
+        if watcher is not None:
+            try:
+                watcher.stop()
+            except Exception:
+                pass
+
+    def _on_clipboard_change(self, change) -> None:
+        """Backend thread: hand the change to Tk without touching widgets."""
+        if self._closing:
+            return
+        self._ui_actions.put(
+            ("clipboard", change.text, change.observed_at_ns, change.backend)
+        )
+
+    def _schedule_target_poll(self) -> None:
+        self._poll_job = self.root.after(TARGET_POLL_MS, self._poll_target)
+
+    def _poll_target(self) -> None:
+        """Remember the foreground window without polling the clipboard."""
+        if self._closing:
+            return
         if self._copyboard_unfocused():
-            # Remember where a later fire should land.  Done on this slower
-            # tick so we do not spawn a window-query process every 90 ms; on
-            # macOS the query is an osascript call, so it runs every third tick.
+            # This is deliberately slower than capture: a window query can
+            # spawn a process, while clipboard changes arrive from the watcher.
             self._target_poll_tick += 1
             if self._target_poll_tick >= TARGET_POLL_TICKS:
                 self._target_poll_tick = 0
                 self._capture_paste_target()
-        self._schedule_clipboard_poll()
+        self._schedule_target_poll()
 
-    def _observe_clipboard(self, current) -> bool:
+    def _observe_clipboard(
+        self,
+        current,
+        observed_at_ns: Optional[int] = None,
+        backend: Optional[str] = None,
+    ) -> bool:
         """Handle one clipboard reading.  Returns True when a round was captured.
 
         Only *external* copies load chamber 01.  Text CopyBoard itself placed
         on the clipboard (firing, copying, cycling by shortcut) is recognised
         via ``core.is_app_clipboard_write`` and skipped, so firing chamber 07
         never moves that round to chamber 01.
+
+        ``observed_at_ns`` is taken by the backend before it reads the
+        clipboard, which makes the recorded span cover the read as well as the
+        queue wait and the chamber refresh.
         """
         if not isinstance(current, str):
             return False
@@ -1303,6 +1401,15 @@ class CopyboardGUI:
             return False
         core.copy_to_board(current)
         self.refresh(select_newest=True)
+        backend_name = backend or (
+            self._watcher.backend_name if self._watcher is not None else "manual"
+        )
+        self._latency.record(
+            "capture_to_chamber",
+            observed_at_ns,
+            backend=backend_name,
+            chars=len(current),
+        )
         self._set_status("New clipboard text auto-loaded into chamber 01")
         return True
 
@@ -1440,6 +1547,8 @@ class CopyboardGUI:
 
     def on_close(self) -> None:
         self._closing = True
+        self._stop_clipboard_watcher()
+        core.set_latency_recorder(None)
         if self._poll_job:
             try:
                 self.root.after_cancel(self._poll_job)

@@ -3,6 +3,13 @@
 ## Unreleased
 
 ### Added
+- Event-driven clipboard capture: XFixes selection events on X11,
+  `wl-paste --watch` on Wayland, `AddClipboardFormatListener` on Windows, and
+  a native change counter on macOS when PyObjC is present; every backend falls
+  back safely to the 650 ms poller when it is unavailable or dies at runtime
+- Content-free capture and fire latency traces, with per-stage percentiles and
+  a private `~/.config/copyboard/latency.jsonl` log (stage, duration, backend,
+  character count — never clipboard text)
 - Configurable cylinder of 10–16 chambers with one source of truth in `core`
   (`get_chamber_count` / `set_chamber_count`) shared by the editor, widget,
   hotkeys, labels, and `config.json`; shrinking asks first and ejects only the
@@ -54,7 +61,7 @@
 
 ### Changed
 - Firing or pasting a chamber is read-only for the cylinder; CopyBoard's own
-  clipboard writes are recorded before they land so the poller never re-loads
+  clipboard writes are recorded before they land so the watcher never re-loads
   a fired round into chamber 01
 - Fire & Hide and widget fires only synthesise a paste after focus provably
   returned to the previous window; otherwise the round stays on the clipboard
@@ -62,9 +69,10 @@
 - The editor's cylinder and the widget's ring now derive their geometry from
   the chamber count and the available canvas, so 16 chambers fit without
   clipping or overlapping targets
-- The 40 ms UI poll no longer queries the foreground window; target capture
-  happens on pointer entry and the slower clipboard tick, so a plate left open
-  all day no longer spawns ~25 `xdotool`/`osascript` processes per second
+- The UI action loop now runs at 16 ms and no longer queries the foreground
+  window; target capture happens on pointer entry and the slower target tick,
+  so a plate left open all day no longer spawns ~25 `xdotool`/`osascript`
+  processes per second
 - History privacy: `board.json` and `config.json` are written owner-only
   (`0600`) on POSIX, and `board.clear_on_exit` wipes the history when the
   editor closes (**CLEAR ON EXIT** in the footer)

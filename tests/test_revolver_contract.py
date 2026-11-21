@@ -785,6 +785,8 @@ def editor(tk_root, isolated_board, fresh_config, monkeypatch):
     gui.root.withdraw()
     yield gui
     gui._closing = True
+    gui._stop_clipboard_watcher()
+    core.set_latency_recorder(None)
     gui._app_icon = None  # release the PhotoImage while the interpreter is alive
     core._reset_app_clipboard_writes()
 

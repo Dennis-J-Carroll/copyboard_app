@@ -50,6 +50,18 @@ _APP_WRITE_TTL = 6.0  # seconds a pending self-write stays recognisable
 _app_clipboard_writes: Dict[str, float] = {}
 _app_clipboard_lock = threading.Lock()
 
+# Optional content-free latency sink installed by the GUI.  Keeping this here
+# lets the direct global-shortcut path be measured even though it runs on the
+# keyboard listener thread and never enters the Tk event loop.
+_latency_recorder = None
+
+
+def set_latency_recorder(recorder) -> None:
+    """Install or clear the latency sink used by core fire paths."""
+    global _latency_recorder
+    _latency_recorder = recorder
+
+
 # Ensure the config directory exists
 if not os.path.exists(BOARD_DIR):
     os.makedirs(BOARD_DIR)
@@ -225,15 +237,32 @@ def paste_from_board(index: int = 0, auto_paste: bool = True) -> bool:
     """
     if not _board or index < 0 or index >= len(_board):
         return False
-        
+
+    recorder = _latency_recorder
+    started = (
+        recorder.mark("fire_requested")
+        if recorder is not None and auto_paste
+        else 0
+    )
+
     # Fast-path: copy the selected item to the clipboard.  This is a read of
     # the board; the item stays exactly where it is.
     set_clipboard_text(_board[index])
-    
+    if recorder is not None and auto_paste:
+        recorder.record("fire_clipboard_written", started, index=index, source="core")
+
     # Attempt to paste it automatically if requested
     if auto_paste:
-        paste_helper.paste_current_clipboard()
-    
+        ok = paste_helper.paste_current_clipboard()
+        if recorder is not None:
+            recorder.record(
+                "fire_to_paste_dispatch",
+                started,
+                index=index,
+                ok=bool(ok),
+                source="core",
+            )
+
     return True
 
 def paste_all(auto_paste: bool = True) -> bool:
@@ -248,13 +277,28 @@ def paste_all(auto_paste: bool = True) -> bool:
     """
     if not _board:
         return False
-        
+
+    recorder = _latency_recorder
+    started = (
+        recorder.mark("fire_requested")
+        if recorder is not None and auto_paste
+        else 0
+    )
     all_content = '\n'.join(_board)
     set_clipboard_text(all_content)
-    
+    if recorder is not None and auto_paste:
+        recorder.record("fire_clipboard_written", started, source="paste_all")
+
     if auto_paste:
-        paste_helper.paste_current_clipboard()
-    
+        ok = paste_helper.paste_current_clipboard()
+        if recorder is not None:
+            recorder.record(
+                "fire_to_paste_dispatch",
+                started,
+                ok=bool(ok),
+                source="paste_all",
+            )
+
     return True
 
 def paste_combination(indices: List[int], auto_paste: bool = True) -> bool:
