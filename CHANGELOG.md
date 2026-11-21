@@ -21,6 +21,11 @@
   (`window.widget_at_pointer`), redraws only the chambers that change on
   hover, keys out its backdrop on Windows, and dismisses on Escape without
   opening the editor; fire delays were trimmed (45 ms flash, 140 ms paste)
+- Pinned plate mode (`window.widget_pinned`, the top-rim PIN control, or `P`):
+  the plate starts and stays on screen between fires, never takes focus from
+  the target app, and redraws immediately when the board changes
+- The paste target is refreshed whenever the pointer enters the plate, so a
+  click pastes into the app the pointer came from rather than a stale window
 - Chamber numbering helpers (`copyboard_extension.chambers`) as the single
   conversion point between board indexes and the `01`–`16` labels
 
@@ -34,6 +39,9 @@
 - The editor's cylinder and the widget's ring now derive their geometry from
   the chamber count and the available canvas, so 16 chambers fit without
   clipping or overlapping targets
+- The 40 ms UI poll no longer queries the foreground window; target capture
+  happens on pointer entry and the slower clipboard tick, so a plate left open
+  all day no longer spawns ~25 `xdotool`/`osascript` processes per second
 - Linux paste keystroke now clears held modifiers (`xdotool --clearmodifiers`)
 
 ## Version 0.5.0 (2026-08-15)

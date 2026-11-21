@@ -170,6 +170,9 @@ class CopyboardGUI:
         self._bind_controls()
         self._apply_always_on_top()
         self.refresh()
+        # A pinned plate is the interface; never flash the editor first.
+        if config.get("window", "widget_pinned", False):
+            self.root.withdraw()
         self._update_capture_state()
         self._schedule_clipboard_poll()
         self._schedule_ui_action_poll()
@@ -177,6 +180,7 @@ class CopyboardGUI:
         # Build the quick-paste plate once the editor is up so the first
         # shortcut press shows it with no construction stall.
         self.root.after(250, self._prebuild_widget)
+        self.root.after(320, self._start_pinned_widget)
 
     # ------------------------------------------------------------------
     # Capacity
@@ -823,6 +827,10 @@ class CopyboardGUI:
         self.selected_index = min(self.selected_index, self.chamber_count() - 1)
         self._refresh_detail()
         self.draw_revolver()
+        if self._widget is not None and self._widget.is_visible():
+            # A pinned plate stays open across captures and ejects, so it has
+            # to follow the board instead of waiting for the next open.
+            self._widget.refresh_contents()
 
     def _refresh_detail(self) -> None:
         content = core.get_chamber(self.selected_index)
@@ -901,26 +909,37 @@ class CopyboardGUI:
             FIRE_FOCUS_DELAY_MS, lambda: self._deliver_fire(index, target, from_widget=False)
         )
 
-    def _deliver_fire(self, index: int, target, from_widget: bool) -> None:
+    def _deliver_fire(
+        self, index: int, target, from_widget: bool, keep_open: bool = False
+    ) -> None:
         """Restore the previous window and paste, or fall back visibly.
 
         A paste is only synthesised when focus provably returned to the
         window captured earlier.  Otherwise the round stays on the clipboard
         and the user is told to paste manually — never a silent paste into
         CopyBoard or an unrelated window.
+
+        ``keep_open`` is pinned mode: the plate is left on screen and the
+        caption confirms the paste instead of disappearing between rounds.
         """
         if self._closing:
             return
         if target is not None and paste_helper.restore_active_window(target):
             self.root.after(FIRE_PASTE_DELAY_MS, paste_helper.paste_current_clipboard)
             self._set_status(f"Fired chamber {chamber_label(index)}")
-            if from_widget and self._widget is not None and self._widget_should_reopen():
+            if keep_open and self._widget is not None and self._widget.is_visible():
+                self.root.after(
+                    FIRE_PASTE_DELAY_MS + 120,
+                    lambda: self._widget and self._widget.confirm_paste(index),
+                )
+            elif from_widget and self._widget is not None and self._widget_should_reopen():
                 self.root.after(FIRE_PASTE_DELAY_MS + 280, self._reshow_widget)
             return
 
         message = focus_fallback_message(index, paste_helper.get_platform())
         if from_widget and self._widget is not None:
-            self._widget.show()
+            if not self._widget.is_visible():
+                self._widget.show()
             self._widget.flash_message(message, error=True, hold_ms=5000)
         else:
             self.root.deiconify()
@@ -976,13 +995,10 @@ class CopyboardGUI:
                 self._handle_ui_action(action)
         except queue.Empty:
             pass
-
-        if (
-            self._widget is not None
-            and self._widget.is_visible()
-            and self._copyboard_unfocused()
-        ):
-            self._capture_paste_target()
+        # The paste target is captured when the pointer reaches the plate and
+        # on the slower clipboard tick.  Querying the foreground window on
+        # this 40 ms loop meant ~25 subprocesses a second on a visible plate —
+        # unacceptable for one that can now stay open all day.
         self._schedule_ui_action_poll()
 
     def _handle_ui_action(self, action) -> None:
@@ -1031,6 +1047,9 @@ class CopyboardGUI:
                 on_eject=self._eject_from_widget,
                 on_capture=self._capture_from_widget,
                 on_dismiss=self._dismiss_widget,
+                on_pin_change=self._save_widget_pin,
+                on_pointer_target=self._remember_widget_target,
+                pinned=config.get("window", "widget_pinned", False),
             )
         return self._widget
 
@@ -1044,12 +1063,21 @@ class CopyboardGUI:
     def open_widget(self) -> None:
         """Collapse the editor into the compact quick-paste plate."""
         if self._widget is not None and self._widget.is_visible():
-            self._dismiss_widget()
+            if self._widget.pinned:
+                # A pinned plate is already on screen; the shortcut lifts it
+                # instead of hiding the instrument the user asked to keep.
+                self._widget.show()
+            else:
+                self._dismiss_widget()
             return
 
-        self._capture_paste_target()
         widget = self._ensure_widget()
+        # Remember the app that was focused before the plate appeared.  Once
+        # the editor is withdrawn the window manager hands focus back, so ask
+        # again shortly after in case CopyBoard itself had it.
+        self._remember_widget_target()
         self.root.withdraw()
+        self.root.after(120, self._remember_widget_target)
         widget.select(self.selected_index)
         at = None
         if config.get("window", "widget_at_pointer", True):
@@ -1078,6 +1106,38 @@ class CopyboardGUI:
         config.set("window", "widget_x", x)
         config.set("window", "widget_y", y)
 
+    def _save_widget_pin(self, pinned: bool) -> None:
+        """PIN control: persist the choice and make the plate the interface."""
+        config.set("window", "widget_pinned", bool(pinned))
+        if pinned:
+            self._remember_widget_target()
+            if self.root.state() != "withdrawn":
+                self.root.withdraw()
+            self._set_status("Plate pinned — it stays on screen after every paste")
+        else:
+            self._set_status("Plate unpinned — it hides after the next paste")
+
+    def _remember_widget_target(self) -> None:
+        """Remember the app the pointer came from before the plate is used.
+
+        Called on pointer entry and before a press takes focus.  The guard
+        keeps CopyBoard's own window from ever replacing a real target.
+        """
+        if self._closing:
+            return
+        if self._copyboard_unfocused():
+            self._capture_paste_target()
+
+    def _start_pinned_widget(self) -> None:
+        """Launch straight into the plate when the user pinned it last time."""
+        if self._closing or not config.get("window", "widget_pinned", False):
+            return
+        widget = self._ensure_widget()
+        widget.set_pinned(True, notify=False)
+        self.root.withdraw()
+        self.root.after(120, self._remember_widget_target)
+        widget.show()
+
     def _restore_from_widget(self) -> None:
         if self._widget is not None:
             self._widget.hide()
@@ -1087,6 +1147,7 @@ class CopyboardGUI:
 
     def _fire_from_widget(self, index: int) -> None:
         """Widget command: paste chamber ``index`` into the previous app."""
+        self._remember_widget_target()
         if self._load_chamber_into_clipboard(index) is None:
             if self._widget is not None:
                 self._widget.flash_message(self.status_var.get(), error=True)
@@ -1095,9 +1156,10 @@ class CopyboardGUI:
         self._refresh_detail()
         self._set_status(f"Firing chamber {chamber_label(index)} from widget")
         target = self._paste_target
-        if self._widget is not None:
+        keep_open = bool(self._widget is not None and self._widget.pinned)
+        if self._widget is not None and not keep_open:
             self._widget.hide()
-        self._deliver_fire(index, target, from_widget=True)
+        self._deliver_fire(index, target, from_widget=True, keep_open=keep_open)
 
     def _eject_from_widget(self, index: int) -> bool:
         """Widget command: eject ``index`` after the widget's double-Delete."""
@@ -1361,6 +1423,7 @@ class ShortcutsDialog:
         ("Widget: wheel, ↑ ↓", "Aim at a round (never fires)"),
         ("Widget: Enter, click", "Fire the aimed round"),
         ("Widget: Delete ×2", "Eject the aimed round"),
+        ("Widget: PIN or P", "Keep the plate on screen between pastes"),
         ("Widget: Esc", "Back to this editor"),
     )
 

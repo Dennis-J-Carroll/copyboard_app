@@ -30,6 +30,8 @@ from copyboard_extension.widget_mode import (
     glow_bands,
     lerp_color,
     next_loaded_index,
+    pin_center,
+    pin_hit,
     position_under_pointer,
     tab_points,
     wheel_step,
@@ -459,6 +461,15 @@ class TestWidgetGeometry:
         assert widget_layout(99).count == 16
         assert widget_layout("12").count == 12
 
+    @pytest.mark.parametrize("count", [10, 16])
+    def test_pin_control_clears_the_copy_tab_and_plate_edge(self, count):
+        layout = widget_layout(count)
+        px, py = pin_center(layout)
+        assert pin_hit(px, py, layout)
+        assert not pin_hit(layout.center_x, py, layout)
+        assert px + 28 < layout.center_x - layout.tab_width / 2
+        assert layout.plate_margin < py - 14
+
     def test_wheel_step_handles_x11_and_delta_forms(self):
         assert wheel_step(num=4, delta=0) == -1
         assert wheel_step(num=5, delta=0) == 1
@@ -667,6 +678,29 @@ class TestQuickPasteWidgetTk:
         assert ejected == [1] and items == ["a", "c"]
         assert fired == []
 
+    def test_pin_control_and_p_key_toggle_keep_open(self, tk_root):
+        from copyboard_extension.widget_mode import QuickPasteWidget, pin_center
+
+        changes = []
+        widget = QuickPasteWidget(
+            parent=tk_root,
+            get_items=lambda: ["a"],
+            describe_item=lambda text: ("TEXT", "T", text),
+            on_fire=lambda index: None,
+            on_restore=lambda: None,
+            get_count=lambda: 10,
+            on_pin_change=changes.append,
+        )
+        widget.show()
+        tk_root.update()
+        px, py = pin_center(widget.layout)
+        widget._on_press(_Event(x=px, y=py, x_root=px, y_root=py))
+        widget._on_release(_Event(x=px, y=py, x_root=px, y_root=py))
+        assert widget.pinned is True and changes == [True]
+        widget._on_key(_Event(char="p"))
+        assert widget.pinned is False and changes == [True, False]
+        assert "UNPINNED" in widget.preview_var.get()
+
 
 @pytest.fixture()
 def editor(tk_root, isolated_board, fresh_config, monkeypatch):
@@ -849,3 +883,48 @@ class TestEditorTk:
         assert editor.selected_index == 2
         assert "10" in editor.status_var.get()
         assert core.get_board() == ["r2", "r1", "r0"]
+
+    def test_pinned_plate_stays_open_after_fire(self, editor, fresh_config, monkeypatch):
+        from copyboard_extension import paste_helper
+
+        pasted = []
+        monkeypatch.setattr(paste_helper, "restore_active_window", lambda target: True)
+        monkeypatch.setattr(paste_helper, "paste_current_clipboard", lambda: pasted.append(True))
+        core.copy_to_board("payload")
+        editor.refresh()
+        editor._hotkey_report = {"show_gui": hotkeys.STATUS_REGISTERED}
+        editor._paste_target = object()
+        editor.open_widget()
+        editor.root.update()
+        widget = editor._widget
+        widget.set_pinned(True)
+        assert fresh_config.get("window", "widget_pinned") is True
+        x, y = widget._centers[0]
+        widget._on_press(_Event(x=x, y=y, x_root=x, y_root=y))
+        widget._on_release(_Event(x=x, y=y, x_root=x, y_root=y))
+        _pump(editor.root, 0.7)
+        assert pasted == [True]
+        assert widget.is_visible() is True
+        assert "STAYS PINNED" in widget.preview_var.get()
+        assert core.get_board() == ["payload"]
+
+    def test_open_plate_follows_board_changes(self, editor):
+        core.copy_to_board("first")
+        editor.refresh()
+        editor.open_widget()
+        editor.root.update()
+        core.copy_to_board("second")
+        editor.refresh()
+        canvas = editor._widget.canvas
+        readout = [canvas.itemcget(item, "text") for item in canvas.find_withtag("readout")]
+        assert "02" in readout
+
+    def test_ui_poll_no_longer_queries_the_foreground_window(self, editor, monkeypatch):
+        calls = []
+        monkeypatch.setattr(editor, "_capture_paste_target", lambda: calls.append(True))
+        editor._hotkey_report = {"show_gui": hotkeys.STATUS_REGISTERED}
+        editor.open_widget()
+        _pump(editor.root, 0.25)   # let the deferred post-withdraw capture run
+        calls.clear()
+        editor._poll_ui_actions()
+        assert calls == []

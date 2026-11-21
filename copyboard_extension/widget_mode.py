@@ -14,12 +14,18 @@ Input it understands while visible and under the pointer:
 * Return / space                                      – fire the highlighted chamber
 * Delete twice                                        – eject the highlighted chamber
 * Escape / right-click / "FULL"                       – restore the editor
+* PIN control or ``p``                                – pin / unpin the plate
 """
 
 from __future__ import annotations
 
 import math
-import tkinter as tk
+
+try:
+    import tkinter as tk
+except ImportError:  # headless environments can still import the geometry helpers
+    tk = None  # type: ignore[assignment]
+
 from dataclasses import dataclass
 from typing import Callable, List, Optional, Sequence, Tuple
 
@@ -67,9 +73,11 @@ MONO = "DejaVu Sans Mono"
 SANS = "DejaVu Sans"
 
 IDLE_PROMPT = "WHEEL OR ↑↓ TO AIM   •   HOLD, DRAG, LET GO TO PASTE"
+PINNED_PROMPT = "PINNED  •  CLICK A CHAMBER TO PASTE  •  STAYS OPEN"
 CHAMBER_HIT_PADDING = 8  # extra pixels of forgiveness around each chamber
 FIRE_FLASH_MS = 45        # brief accent flash before the host hides the widget
 EJECT_CONFIRM_MS = 2500   # second Delete must arrive within this window
+PIN_HOLD_MS = 2200        # how long the pin on/off confirmation stays up
 
 
 @dataclass(frozen=True)
@@ -137,6 +145,17 @@ def widget_layout(count: object) -> WidgetLayout:
         hub_radius=max(52.0, ring_radius - chamber_radius - 34),
         center_y=size / 2,
     )
+
+
+def pin_center(layout: WidgetLayout) -> Point:
+    """Centre of the PIN control, on the top rim clear of the COPY tab."""
+    return (layout.center_x - 104.0, layout.plate_margin + 30.0)
+
+
+def pin_hit(x: float, y: float, layout: WidgetLayout) -> bool:
+    """Whether a canvas point lands on the PIN control."""
+    px, py = pin_center(layout)
+    return abs(x - px) <= 28 and abs(y - py) <= 14
 
 
 def lerp_color(start: str, end: str, t: float) -> str:
@@ -259,6 +278,9 @@ class QuickPasteWidget:
         on_eject: Optional[Callable[[int], bool]] = None,
         on_capture: Optional[Callable[[], None]] = None,
         on_dismiss: Optional[Callable[[], None]] = None,
+        on_pin_change: Optional[Callable[[bool], None]] = None,
+        on_pointer_target: Optional[Callable[[], None]] = None,
+        pinned: bool = False,
     ) -> None:
         self.parent = parent
         self.get_items = get_items
@@ -268,6 +290,11 @@ class QuickPasteWidget:
         self.on_eject = on_eject
         self.on_capture = on_capture
         self._on_dismiss = on_dismiss
+        self._on_pin_change = on_pin_change
+        self._on_pointer_target = on_pointer_target
+        # A pinned plate never hides after a fire and never takes focus from
+        # the app it pastes into; it stays on screen for the next round.
+        self.pinned = bool(pinned)
         self._tabs: dict = {}          # "copy" / "paste" -> (x0, y0, x1, y1)
         self._hovered_tab: Optional[str] = None
         self._plate_drag: Optional[Point] = None
@@ -341,6 +368,29 @@ class QuickPasteWidget:
         )
 
     # ------------------------------------------------------------------
+    # Pinning
+    # ------------------------------------------------------------------
+    def set_pinned(self, pinned: bool, notify: bool = True) -> None:
+        """Pin or unpin the plate; a pinned plate stays open after a fire."""
+        pinned = bool(pinned)
+        if pinned == self.pinned:
+            return
+        self.pinned = pinned
+        self.redraw()
+        if notify and self._on_pin_change is not None:
+            self._on_pin_change(pinned)
+        self.flash_message(
+            "PINNED — PASTES LEAVE THE PLATE ON SCREEN"
+            if pinned
+            else "UNPINNED — THE PLATE HIDES AFTER EACH PASTE",
+            hold_ms=PIN_HOLD_MS,
+        )
+
+    def toggle_pin(self) -> None:
+        """PIN control / ``p``: flip the keep-open behaviour."""
+        self.set_pinned(not self.pinned)
+
+    # ------------------------------------------------------------------
     # State helpers
     # ------------------------------------------------------------------
     @property
@@ -365,6 +415,28 @@ class QuickPasteWidget:
             self.flash_message("No rounds loaded yet", error=True)
             return
         self.select(target)
+
+    def refresh_contents(self) -> None:
+        """Redraw board-derived content while the plate is open.
+
+        The host calls this after auto-capture, an edit, or an eject so a
+        pinned plate never shows a stale count or stale chamber fills.
+        """
+        if not self.is_visible():
+            return
+        self._sync_layout()
+        items = list(self.get_items())
+        if items:
+            self._selected = min(self._selected, len(items) - 1)
+        self.redraw()
+        if self._message_job is None and self._eject_armed is None:
+            self._show_selected_preview()
+
+    def confirm_paste(self, index: int) -> None:
+        """Caption for a keep-open fire: the paste landed, the plate stays."""
+        self.flash_message(
+            f"PASTED {chamber_label(index)}  /  PLATE STAYS PINNED", hold_ms=PIN_HOLD_MS
+        )
 
     def flash_message(self, text: str, error: bool = False, hold_ms: int = 2600) -> None:
         """Show a short status line in the preview strip, then return to idle."""
@@ -400,7 +472,7 @@ class QuickPasteWidget:
         elif self._selected < len(items):
             self._set_preview(self._describe(self._selected))
         else:
-            self._set_preview(IDLE_PROMPT)
+            self._set_preview(PINNED_PROMPT if self.pinned else IDLE_PROMPT)
 
     def _sync_layout(self) -> None:
         layout = widget_layout(self.get_count())
@@ -519,6 +591,7 @@ class QuickPasteWidget:
             self._draw_chamber(index, x, y, layout.chamber_radius, items)
         self._draw_readout(items)
         self._draw_tabs(cx, layout.size, layout)
+        self._draw_pin()
         m = layout.plate_margin
         canvas.create_text(
             layout.size - m - 16, m + 16, text="↗", fill=LABEL_ON_STEEL,
@@ -537,6 +610,23 @@ class QuickPasteWidget:
         canvas.create_text(
             cx, cy + 9, text=f"of {layout.count}", fill=TEXT_DIM, font=(MONO, 6, "bold"),
             tags=("dyn", "readout"),
+        )
+
+    def _draw_pin(self) -> None:
+        """A small pill on the top rim: lit when the plate is pinned."""
+        canvas = self.canvas
+        assert canvas is not None
+        px, py = pin_center(self.layout)
+        active = self.pinned
+        canvas.create_oval(
+            px - 25, py - 11, px + 25, py + 11,
+            fill=lerp_color(PLATE, GLOW_CORE, 0.45) if active else DIAL,
+            outline=GLOW_OUTER if active else STEEL_DARK, width=2,
+            tags=("dyn", "pin"),
+        )
+        canvas.create_text(
+            px, py - 1, text="PIN", fill=GLOW_OUTER if active else LABEL_ON_STEEL,
+            font=(SANS, 7, "bold"), tags=("dyn", "pin"),
         )
 
     def _refresh_chambers(self, *indices: Optional[int]) -> None:
@@ -706,6 +796,9 @@ class QuickPasteWidget:
         self.canvas.bind("<MouseWheel>", self._on_wheel)
         self.canvas.bind("<Button-4>", self._on_wheel)
         self.canvas.bind("<Button-5>", self._on_wheel)
+        # Entering the plate is the last moment the target app is known to be
+        # the one the user came from; let the host remember it before a click.
+        self.canvas.bind("<Enter>", self._on_pointer_enter)
 
         self.preview_label = tk.Label(
             window, textvariable=self.preview_var, anchor=tk.CENTER, bg=CAPTION_BG,
@@ -722,6 +815,18 @@ class QuickPasteWidget:
             if math.hypot(x - cx, y - cy) <= self.layout.hit_radius:
                 return index
         return None
+
+    def _report_pointer_target(self) -> None:
+        if self._on_pointer_target is None:
+            return
+        try:
+            self._on_pointer_target()
+        except Exception:
+            # Target discovery is best-effort; it must never block a fire.
+            pass
+
+    def _on_pointer_enter(self, _event) -> None:
+        self._report_pointer_target()
 
     def _on_motion(self, event) -> None:
         hovered = self._chamber_at(event.x, event.y)
@@ -759,9 +864,16 @@ class QuickPasteWidget:
             self._refresh_chambers(previous)
 
     def _on_press(self, event) -> None:
-        if self.window is not None and self.window.winfo_exists():
+        # Capture the paste target before this window can take focus.
+        self._report_pointer_target()
+        if (
+            not self.pinned
+            and self.window is not None
+            and self.window.winfo_exists()
+        ):
             # Override-redirect windows do not receive focus from the window
-            # manager; take it explicitly so the keyboard controls work.
+            # manager; take it explicitly so the keyboard controls work.  A
+            # pinned plate stays passive so the target app keeps focus.
             try:
                 self.window.focus_force()
             except tk.TclError:
@@ -770,7 +882,9 @@ class QuickPasteWidget:
         self._press_point = (event.x_root, event.y_root)
         self._dragging_round = False
         self._plate_drag = None
-        if self._pressed is not None:
+        if pin_hit(event.x, event.y, self.layout):
+            pass  # the PIN pill is a button, never a drag handle
+        elif self._pressed is not None:
             self._disarm_eject()
         elif self._tab_at(event.x, event.y) is None and not self._restore_glyph_at(event.x, event.y):
             # Pressing bare steel drags the whole plate around the screen.
@@ -806,6 +920,10 @@ class QuickPasteWidget:
             self.redraw()
             return
         if index is None:
+            if pin_hit(event.x, event.y, self.layout):
+                self.toggle_pin()
+                self.redraw()
+                return
             tab = self._tab_at(event.x, event.y)
             if tab == "copy":
                 self.capture_clipboard()
@@ -838,6 +956,8 @@ class QuickPasteWidget:
             index = self._dial.press(char)
             if index is not None:
                 self.select(index)
+        elif char.lower() == "p":
+            self.toggle_pin()
 
     def capture_clipboard(self) -> None:
         """COPY tab: ask the host to load the current clipboard into chamber 01."""

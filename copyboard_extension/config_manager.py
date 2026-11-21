@@ -28,7 +28,9 @@ DEFAULT_CONFIG = {
         # this is true or no global shortcut exists to bring it back.
         "widget_reopen_after_fire": False,
         # Open the plate under the mouse pointer instead of its saved spot.
-        "widget_at_pointer": True
+        "widget_at_pointer": True,
+        # Keep the plate on screen after every paste and start it pinned.
+        "widget_pinned": False
     },
     "hotkeys": {
         "show_gui": "ctrl+alt+c",

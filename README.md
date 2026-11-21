@@ -94,6 +94,7 @@ paste so the app can always be reached.
 | Click a chamber, **PASTE** tab, `Enter`, `Space` | Fire the aimed round |
 | Hold, drag, release | Fire and hide in one motion |
 | **COPY** tab | Load the current clipboard into chamber 01 |
+| **PIN** or `P` | Keep the plate on screen between pastes; click again to unpin |
 | `Delete` twice | Eject the aimed round (first press only arms it) |
 | Drag bare steel | Move the plate |
 | `Esc` or `Ctrl+Alt+C` | Dismiss the plate |
@@ -122,6 +123,7 @@ local and offline.
 | `board.auto_capture` | `true` | Load new external copies into chamber 01 |
 | `window.widget_at_pointer` | `true` | Open the plate under the mouse pointer instead of its saved spot |
 | `window.widget_reopen_after_fire` | `false` | Bring the plate back after every paste (always true when no shortcut can reopen it) |
+| `window.widget_pinned` | `false` | Start and keep the plate on screen: a fire leaves it open and it does not take focus from the app being pasted into |
 | `hotkeys.*` | see below | Global shortcut combos, editable from **SHORTCUTS** |
 
 ## Mobile direction
