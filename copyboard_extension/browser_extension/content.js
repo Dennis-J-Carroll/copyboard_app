@@ -5,6 +5,19 @@ function log(message) {
   console.log('[Copyboard Content Script]', message);
 }
 
+// Close the radial overlay and detach every listener it installed.  Escape,
+// an overlay click and a chamber pick all go through here: leaving the digit
+// handler bound made the next digit press remove an already-detached overlay
+// and throw inside the content script.
+function closeRadialMenu(overlay) {
+  if (!overlay) return;
+  document.removeEventListener('keydown', overlay.copyboardEscapeHandler);
+  document.removeEventListener('keydown', overlay.copyboardKeyHandler);
+  if (overlay.parentNode) {
+    overlay.parentNode.removeChild(overlay);
+  }
+}
+
 // Log script initialization
 log('Content script loaded');
 
@@ -155,19 +168,20 @@ function showRadialMenu() {
     overlay.style.alignItems = 'center';
     
     // Close on escape key
-    document.addEventListener('keydown', function escHandler(e) {
+    const escHandler = function(e) {
       if (e.key === 'Escape') {
         log('Closing radial menu on Escape key');
-        document.body.removeChild(overlay);
-        document.removeEventListener('keydown', escHandler);
+        closeRadialMenu(overlay);
       }
-    });
+    };
+    overlay.copyboardEscapeHandler = escHandler;
+    document.addEventListener('keydown', escHandler);
     
     // Close on overlay click
     overlay.addEventListener('click', function(e) {
       if (e.target === overlay) {
         log('Closing radial menu on overlay click');
-        document.body.removeChild(overlay);
+        closeRadialMenu(overlay);
       }
     });
     
@@ -206,11 +220,7 @@ function showRadialMenu() {
         overlay.appendChild(noItems);
         
         // Auto close after 2 seconds
-        setTimeout(() => {
-          if (document.body.contains(overlay)) {
-            document.body.removeChild(overlay);
-          }
-        }, 2000);
+        setTimeout(() => closeRadialMenu(overlay), 2000);
       }
     });
   } catch (e) {
@@ -273,10 +283,8 @@ function createRadialMenu(overlay, items) {
         // Paste this item
         pasteContent(item);
         
-        // Remove menu and overlay
-        if (document.body.contains(overlay)) {
-          document.body.removeChild(overlay);
-        }
+        // Remove menu and overlay, including the keyboard listener
+        closeRadialMenu(overlay);
       });
       
       itemsContainer.appendChild(itemElem);
@@ -286,17 +294,18 @@ function createRadialMenu(overlay, items) {
     overlay.appendChild(menu);
     
     // Add keyboard handling: 1–9 pick chambers 01–09, 0 picks chamber 10.
-    document.addEventListener('keydown', function keyHandler(e) {
+    const keyHandler = function(e) {
       if (!/^[0-9]$/.test(e.key)) return;
       const number = parseInt(e.key, 10);
       const itemIndex = number === 0 ? 9 : number - 1;
       if (itemIndex >= 0 && itemIndex < items.length) {
         log('Item selected via keyboard: ' + itemIndex);
         pasteContent(items[itemIndex]);
-        document.body.removeChild(overlay);
-        document.removeEventListener('keydown', keyHandler);
+        closeRadialMenu(overlay);
       }
-    });
+    };
+    overlay.copyboardKeyHandler = keyHandler;
+    document.addEventListener('keydown', keyHandler);
   } catch (e) {
     log('Error creating radial menu: ' + e.message);
   }

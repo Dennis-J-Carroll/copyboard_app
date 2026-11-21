@@ -39,6 +39,15 @@
 - Chamber numbering helpers (`copyboard_extension.chambers`) as the single
   conversion point between board indexes and the `01`–`16` labels
 
+### Fixed
+- The native messaging host starts when Chrome executes it directly, as the
+  host manifest does, instead of failing on a relative import; the installer
+  now derives the Chrome extension ID from the manifest key rather than a
+  stale hard-coded default
+- Dismissing the radial menu (Escape, backdrop click or a chamber pick) now
+  detaches its keyboard handler, so a later digit press no longer throws
+  inside the content script
+
 ### Changed
 - Firing or pasting a chamber is read-only for the cylinder; CopyBoard's own
   clipboard writes are recorded before they land so the poller never re-loads

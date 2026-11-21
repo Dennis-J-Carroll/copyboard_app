@@ -10,6 +10,8 @@ import sys
 import json
 import shutil
 import stat
+import base64
+import hashlib
 import platform
 import argparse
 import subprocess
@@ -28,6 +30,25 @@ DEFAULT_HOST_INSTALL_PATH = "/usr/lib/copyboard_extension/native_messaging_host.
 # Native Messaging Host Name
 NATIVE_HOST_NAME = "com.copyboard.extension"
 # --- End Configuration ---
+
+def chrome_extension_id_from_key(key: str) -> str:
+    """Derive the stable Chrome extension ID from the manifest's public key."""
+    digest = hashlib.sha256(base64.b64decode(key)).hexdigest()[:32]
+    return "".join(chr(ord("a") + int(nibble, 16)) for nibble in digest)
+
+def default_chrome_extension_id(project_root: str) -> Optional[str]:
+    """Read the unpacked extension's key so the host accepts the real ID.
+
+    A hard-coded ID drifts as soon as the manifest key changes, and the browser
+    then refuses every native message from the extension.
+    """
+    manifest_path = os.path.join(project_root, "browser_extension", "manifest.json")
+    try:
+        with open(manifest_path, encoding="utf-8") as handle:
+            key = json.load(handle).get("key")
+    except (OSError, ValueError):
+        return None
+    return chrome_extension_id_from_key(key) if key else None
 
 def get_dev_chrome_dir() -> str:
     """
@@ -132,8 +153,8 @@ def main() -> None:
         help="Browser to install for (default: all)"
     )
     parser.add_argument(
-        "--chrome-id", default="ckhambjmhhinampfpogbjkflkgimdjio", # Replace if you use a fixed key
-        help="Your Chrome Extension ID (obtain after first upload or from key)"
+        "--chrome-id", default=None,
+        help="Chrome Extension ID (default: derived from browser_extension/manifest.json)"
     )
     parser.add_argument(
         "--host-path", default=None,
@@ -152,6 +173,9 @@ def main() -> None:
             project_root, "copyboard_extension", "native_messaging_host.py"
         )
         host_script_abs_path = os.path.abspath(host_script_rel_path)
+
+    if args.chrome_id is None:
+        args.chrome_id = default_chrome_extension_id(project_root)
 
     if not os.path.exists(host_script_abs_path):
         print(f"Error: Native host script not found at {host_script_abs_path}")

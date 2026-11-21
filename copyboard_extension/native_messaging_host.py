@@ -19,12 +19,19 @@ logging.basicConfig(
 )
 logger = logging.getLogger('copyboard_native_messaging')
 
-# Import core functionality
+# Import core functionality.  The native messaging host manifest records the
+# path to this file, so the browser executes it as a plain script with no
+# package context and the relative import below would fail.  Fall back to the
+# package import with the project root on sys.path so both entry points work.
 try:
     from . import core
 except ImportError:
-    logger.error("Failed to import copyboard_extension.core")
-    sys.exit(1)
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    try:
+        from copyboard_extension import core
+    except ImportError:
+        logger.error("Failed to import copyboard_extension.core")
+        sys.exit(1)
 
 def get_message() -> Dict[str, Any]:
     """
