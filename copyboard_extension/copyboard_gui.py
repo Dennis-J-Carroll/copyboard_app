@@ -1421,6 +1421,7 @@ class ShortcutsDialog:
         ("Delete", "Eject the selected round"),
         ("Double-click", "Copy a chamber immediately"),
         ("Widget: wheel, ↑ ↓", "Aim at a round (never fires)"),
+        ("Widget: press + flick", "Fire the chamber you flick toward"),
         ("Widget: Enter, click", "Fire the aimed round"),
         ("Widget: Delete ×2", "Eject the aimed round"),
         ("Widget: PIN or P", "Keep the plate on screen between pastes"),

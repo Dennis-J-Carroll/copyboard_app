@@ -92,11 +92,11 @@ paste so the app can always be reached.
 | Hover, mouse wheel (pointer over the plate), `↑` `↓` | Aim at a round; never fires |
 | `1`–`9`, `0`, or two quick digits (`1` then `4` = 14) | Aim by chamber number |
 | Click a chamber, **PASTE** tab, `Enter`, `Space` | Fire the aimed round |
-| Hold, drag, release | Fire and hide in one motion |
+| Press, flick toward a chamber, release | Fire the chamber you flick toward |
 | **COPY** tab | Load the current clipboard into chamber 01 |
 | **PIN** or `P` | Keep the plate on screen between pastes; click again to unpin |
 | `Delete` twice | Eject the aimed round (first press only arms it) |
-| Drag bare steel | Move the plate |
+| Drag the outer rim | Move the plate |
 | `Esc` or `Ctrl+Alt+C` | Dismiss the plate |
 | Right-click or `↗` | Back to the full editor |
 

@@ -27,12 +27,14 @@ from copyboard_extension.chambers import (
 )
 from copyboard_extension.widget_mode import (
     chamber_fill,
+    direction_index,
     glow_bands,
     lerp_color,
     next_loaded_index,
     pin_center,
     pin_hit,
     position_under_pointer,
+    radial_centers,
     tab_points,
     wheel_step,
     widget_layout,
@@ -462,6 +464,16 @@ class TestWidgetGeometry:
         assert widget_layout("12").count == 12
 
     @pytest.mark.parametrize("count", [10, 16])
+    def test_flick_direction_matches_every_chamber(self, count):
+        layout = widget_layout(count)
+        centers = radial_centers(
+            count, layout.center_x, layout.center_y, layout.ring_radius
+        )
+        for index, point in enumerate(centers):
+            assert direction_index(point, layout) == index
+        assert direction_index((layout.center_x, layout.center_y), layout) is None
+
+    @pytest.mark.parametrize("count", [10, 16])
     def test_pin_control_clears_the_copy_tab_and_plate_edge(self, count):
         layout = widget_layout(count)
         px, py = pin_center(layout)
@@ -677,6 +689,30 @@ class TestQuickPasteWidgetTk:
         widget.request_eject()
         assert ejected == [1] and items == ["a", "c"]
         assert fired == []
+
+    def test_flick_from_the_hub_fires_the_chamber_it_faces(self, tk_root):
+        items = [f"r{i}" for i in range(10)]
+        widget, fired, _ = self._widget(tk_root, items, count=10)
+        cx, cy = widget.layout.center_x, widget.layout.center_y
+        widget._on_press(_Event(x=cx, y=cy, x_root=cx, y_root=cy))
+        assert widget._flicking_from_dial is True
+        tx, ty = widget._centers[5]
+        widget._on_round_drag(_Event(x=tx, y=ty, x_root=tx, y_root=ty))
+        assert widget._flick_index == 5
+        widget._on_release(_Event(x=tx, y=ty, x_root=tx, y_root=ty))
+        _pump(tk_root, 0.2)
+        assert fired == [5]
+
+    def test_flick_direction_overrides_where_the_press_landed(self, tk_root):
+        items = [f"r{i}" for i in range(10)]
+        widget, fired, _ = self._widget(tk_root, items, count=10)
+        px, py = widget._centers[0]
+        widget._on_press(_Event(x=px, y=py, x_root=px, y_root=py))
+        tx, ty = widget._centers[7]
+        widget._on_round_drag(_Event(x=tx, y=ty, x_root=tx, y_root=ty))
+        widget._on_release(_Event(x=tx, y=ty, x_root=tx, y_root=ty))
+        _pump(tk_root, 0.2)
+        assert fired == [7]
 
     def test_pin_control_and_p_key_toggle_keep_open(self, tk_root):
         from copyboard_extension.widget_mode import QuickPasteWidget, pin_center

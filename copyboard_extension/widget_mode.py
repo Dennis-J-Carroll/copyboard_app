@@ -7,7 +7,7 @@ through callbacks.  It never mutates the board itself.
 
 Input it understands while visible and under the pointer:
 
-* hover / click / hold-and-drag a chamber  – preview, fire
+* hover / click a chamber, or flick toward one – preview, fire
 * mouse wheel (``<MouseWheel>`` and X11 Button-4/5) – move the highlight only
 * ``1``–``9``, ``0`` and two-digit entry (``1`` then ``2``)  – select a chamber
 * arrow keys                                          – move the highlight
@@ -72,7 +72,7 @@ ERROR = "#E56B6F"
 MONO = "DejaVu Sans Mono"
 SANS = "DejaVu Sans"
 
-IDLE_PROMPT = "WHEEL OR ↑↓ TO AIM   •   HOLD, DRAG, LET GO TO PASTE"
+IDLE_PROMPT = "FLICK AT A ROUND TO PASTE   •   WHEEL OR ↑↓ TO AIM"
 PINNED_PROMPT = "PINNED  •  CLICK A CHAMBER TO PASTE  •  STAYS OPEN"
 CHAMBER_HIT_PADDING = 8  # extra pixels of forgiveness around each chamber
 FIRE_FLASH_MS = 45        # brief accent flash before the host hides the widget
@@ -156,6 +156,21 @@ def pin_hit(x: float, y: float, layout: WidgetLayout) -> bool:
     """Whether a canvas point lands on the PIN control."""
     px, py = pin_center(layout)
     return abs(x - px) <= 28 and abs(y - py) <= 14
+
+
+def direction_index(point: Point, layout: WidgetLayout) -> Optional[int]:
+    """Chamber nearest a flick direction from the hub, or None in the dead zone.
+
+    The plate's chambers start at twelve o'clock and run clockwise, so a
+    pointer above the hub aims at chamber 01 no matter where the press began.
+    """
+    dx = float(point[0]) - layout.center_x
+    dy = float(point[1]) - layout.center_y
+    if math.hypot(dx, dy) < layout.hub_radius * 0.55:
+        return None
+    angle = math.degrees(math.atan2(dy, dx)) + 90.0
+    step = 360.0 / layout.count
+    return int(math.floor(angle / step + 0.5)) % layout.count
 
 
 def lerp_color(start: str, end: str, t: float) -> str:
@@ -319,6 +334,8 @@ class QuickPasteWidget:
         self._message_job: Optional[str] = None
         self._press_point: Point = (0, 0)
         self._dragging_round = False
+        self._flick_index: Optional[int] = None
+        self._flicking_from_dial = False
         self._move_offset: Point = (0, 0)
         self._dial = ChamberDial(self.get_count)
 
@@ -882,13 +899,22 @@ class QuickPasteWidget:
         self._press_point = (event.x_root, event.y_root)
         self._dragging_round = False
         self._plate_drag = None
+        self._flick_index = None
+        self._flicking_from_dial = False
         if pin_hit(event.x, event.y, self.layout):
             pass  # the PIN pill is a button, never a drag handle
         elif self._pressed is not None:
             self._disarm_eject()
         elif self._tab_at(event.x, event.y) is None and not self._restore_glyph_at(event.x, event.y):
-            # Pressing bare steel drags the whole plate around the screen.
-            self._plate_drag = (event.x, event.y)
+            if math.hypot(
+                event.x - self.layout.center_x, event.y - self.layout.center_y
+            ) <= self.layout.glow_radius - 10:
+                # A press on the dial starts a flick; direction is only known
+                # once the pointer has moved away from the hub.
+                self._flicking_from_dial = True
+            else:
+                # Pressing the outer rim drags the whole plate around.
+                self._plate_drag = (event.x, event.y)
         self.redraw()
 
     def _on_round_drag(self, event) -> None:
@@ -897,20 +923,28 @@ class QuickPasteWidget:
                 f"+{int(event.x_root - self._plate_drag[0])}+{int(event.y_root - self._plate_drag[1])}"
             )
             return
-        if self._pressed is None:
+        if self._pressed is None and not self._flicking_from_dial:
             return
-        if is_drag_gesture(self._press_point, (event.x_root, event.y_root)):
-            self._dragging_round = True
-            self._set_preview(
-                f"ROUND {chamber_label(self._pressed)} ARMED  /  RELEASE TO PASTE"
-            )
-            if self.canvas is not None:
-                self.canvas.configure(cursor="target")
+        if not is_drag_gesture(self._press_point, (event.x_root, event.y_root)):
+            return
+        self._dragging_round = True
+        index = direction_index((event.x, event.y), self.layout)
+        if index is None:
+            return
+        self._flick_index = index
+        if index != self._selected:
+            self.select(index)
+        self._set_preview(f"FLICK → {chamber_label(index)}  /  RELEASE TO PASTE")
+        if self.canvas is not None:
+            self.canvas.configure(cursor="target")
 
     def _on_release(self, event) -> None:
         index = self._pressed
+        flicked = self._flick_index if self._dragging_round else None
         self._pressed = None
         self._dragging_round = False
+        self._flick_index = None
+        self._flicking_from_dial = False
         if self.canvas is not None:
             self.canvas.configure(cursor="hand2")
         if self._plate_drag is not None:
@@ -919,7 +953,8 @@ class QuickPasteWidget:
                 self.on_move(self.window.winfo_x(), self.window.winfo_y())
             self.redraw()
             return
-        if index is None:
+        target = flicked if flicked is not None else index
+        if target is None:
             if pin_hit(event.x, event.y, self.layout):
                 self.toggle_pin()
                 self.redraw()
@@ -933,12 +968,12 @@ class QuickPasteWidget:
                 self.on_restore()
             self.redraw()
             return
-        if index < len(self.get_items()):
-            self._selected = index
-            self._fire(index)
+        if target < len(self.get_items()):
+            self._selected = target
+            self._fire(target)
         else:
-            self.select(index)
-            self.flash_message(f"Chamber {chamber_label(index)} is empty", error=True)
+            self.select(target)
+            self.flash_message(f"Chamber {chamber_label(target)} is empty", error=True)
 
     def _on_wheel(self, event) -> str:
         """Rotate the highlight one chamber per notch.  Never fires."""

@@ -24,6 +24,9 @@
 - Pinned plate mode (`window.widget_pinned`, the top-rim PIN control, or `P`):
   the plate starts and stays on screen between fires, never takes focus from
   the target app, and redraws immediately when the board changes
+- Flick selection: press anywhere on the dial and drag toward a chamber; the
+  chamber you face is highlighted and fired on release, so aiming no longer
+  depends on hitting the right chamber before the gesture starts
 - The paste target is refreshed whenever the pointer enters the plate, so a
   click pastes into the app the pointer came from rather than a stale window
 - Chamber numbering helpers (`copyboard_extension.chambers`) as the single
