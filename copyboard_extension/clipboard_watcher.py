@@ -34,7 +34,7 @@ from typing import Any, Callable, Dict, Optional
 
 import pyperclip
 
-from .native_clipboard import create_native_reader
+from .native_clipboard import ClipboardSnapshot, create_native_reader
 
 LOGGER = logging.getLogger(__name__)
 
@@ -54,6 +54,20 @@ class ClipboardChange:
     text: str
     observed_at_ns: int
     backend: str
+    sensitive: bool = False
+
+
+def read_clipboard_snapshot(reader: Callable[[], Any]) -> ClipboardSnapshot:
+    """Read text and confidentiality markers through any reader shape."""
+    snapshot_reader = getattr(reader, "read_snapshot", None)
+    if snapshot_reader is not None:
+        return snapshot_reader()
+    result = reader()
+    if isinstance(result, ClipboardSnapshot):
+        return result
+    return ClipboardSnapshot(
+        text=result if isinstance(result, str) else str(result or "")
+    )
 
 
 ChangeCallback = Callable[[ClipboardChange], None]
@@ -84,7 +98,13 @@ class ClipboardBackend:
     def stop(self) -> None:
         raise NotImplementedError
 
-    def _emit_text(self, text: Any, observed_at_ns: Optional[int] = None) -> None:
+    def _emit_text(
+        self,
+        text: Any,
+        observed_at_ns: Optional[int] = None,
+        *,
+        sensitive: bool = False,
+    ) -> None:
         if observed_at_ns is None:
             observed_at_ns = time.perf_counter_ns()
         try:
@@ -93,6 +113,7 @@ class ClipboardBackend:
                     text=text if isinstance(text, str) else str(text or ""),
                     observed_at_ns=observed_at_ns,
                     backend=self.name,
+                    sensitive=bool(sensitive),
                 )
             )
         except Exception:
@@ -108,11 +129,13 @@ class ClipboardBackend:
         """
         observed_at_ns = time.perf_counter_ns()
         try:
-            text = self._read_clipboard()
+            snapshot = read_clipboard_snapshot(self._read_clipboard)
         except Exception as exc:  # clipboard may be locked or empty
             LOGGER.debug("%s clipboard read failed: %s", self.name, exc)
             return
-        self._emit_text(text, observed_at_ns)
+        self._emit_text(
+            snapshot.text, observed_at_ns, sensitive=snapshot.sensitive
+        )
 
     def _fail(self, reason: str) -> None:
         if self._failure_reported:
@@ -173,7 +196,8 @@ class PollingBackend(ClipboardBackend):
         """Perform one deterministic poll (also used by tests)."""
         observed_at_ns = time.perf_counter_ns()
         try:
-            text = self._read_clipboard()
+            snapshot = read_clipboard_snapshot(self._read_clipboard)
+            text = snapshot.text
         except Exception as exc:
             LOGGER.debug("polling clipboard read failed: %s", exc)
             return None
@@ -190,6 +214,7 @@ class PollingBackend(ClipboardBackend):
             text=text if isinstance(text, str) else str(text or ""),
             observed_at_ns=observed_at_ns,
             backend=self.name,
+            sensitive=snapshot.sensitive,
         )
 
     def _run(self) -> None:
@@ -731,10 +756,9 @@ class MacOSChangeCountBackend(ClipboardBackend):
                 if count == self._last_count:
                     continue
                 self._last_count = count
-                text = pasteboard.stringForType_("public.utf8-plain-text")
-                if text is None:
-                    text = ""
-                self._emit_text(text)
+                # Go through the backend reader so a transient pasteboard
+                # error falls back per event instead of demoting the backend.
+                self._emit_current()
         except Exception as exc:
             if not self._stop.is_set():
                 self._fail(str(exc))
@@ -804,16 +828,19 @@ class _ReaderWithFallback:
         self.name = getattr(native, "name", "native")
         self._warned = False
 
-    def __call__(self) -> Any:
+    def read_snapshot(self) -> ClipboardSnapshot:
         try:
-            return self._native()
+            return read_clipboard_snapshot(self._native)
         except Exception as exc:
             if not self._warned:
                 LOGGER.warning(
                     "Native clipboard read failed (%s); using pyperclip", exc
                 )
                 self._warned = True
-            return pyperclip.paste()
+            return ClipboardSnapshot(text=pyperclip.paste())
+
+    def __call__(self) -> Any:
+        return self.read_snapshot().text
 
 
 class ClipboardWatcher:
@@ -890,13 +917,35 @@ class ClipboardWatcher:
         return self._reader_name
 
     @staticmethod
+    def _reader_kind(kind: str) -> str:
+        """Pick a reader independently of the event backend.
+
+        ``polling`` exists because the event backend failed, not because the
+        platform lacks a native reader.  Keeping the native reader on that
+        path avoids spawning a clipboard utility four times a second and
+        preserves confidentiality markers during a fallback.
+        """
+        if kind in {"x11", "windows", "macos"}:
+            return kind
+        if kind != "polling":
+            return kind
+        if os.name == "nt":
+            return "windows"
+        system = platform.system().lower()
+        if system == "darwin":
+            return "macos"
+        if system == "linux" and os.environ.get("DISPLAY"):
+            return "x11"
+        return kind
+
+    @staticmethod
     def _select_reader(
         read_clipboard: Optional[Callable[[], Any]], kind: str
     ):
         if read_clipboard is not None:
             return read_clipboard, "custom"
         try:
-            native = create_native_reader(kind)
+            native = create_native_reader(ClipboardWatcher._reader_kind(kind))
         except Exception as exc:
             LOGGER.warning("Could not create a native clipboard reader: %s", exc)
             native = None

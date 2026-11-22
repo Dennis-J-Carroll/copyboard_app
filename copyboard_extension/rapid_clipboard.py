@@ -125,9 +125,8 @@ class RapidClipboard:
         if content is None:
             return False
             
-        # Copy to clipboard
-        import pyperclip
-        pyperclip.copy(content)
+        # Copy to clipboard through the shared native/fallback boundary
+        core.set_clipboard_text(content)
         
         # Schedule delayed paste
         return paste_helper.paste_with_delay(delay_ms)

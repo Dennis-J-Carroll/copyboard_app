@@ -177,7 +177,7 @@ def test_watcher_change_goes_through_the_tk_action_queue(isolated_board):
     gui._on_clipboard_change(ClipboardChange("queued text", 123_456, "fake"))
 
     action = gui._ui_actions.get_nowait()
-    assert action == ("clipboard", "queued text", 123_456, "fake")
+    assert action == ("clipboard", "queued text", 123_456, "fake", False)
     gui._handle_ui_action(action)
     sample = gui._latency.recent()[-1]
     assert sample["name"] == "capture_to_chamber"
@@ -276,3 +276,19 @@ def test_fire_dispatch_records_full_span(monkeypatch):
     stages = gui._latency.snapshot()["stages"]
     assert "fire_focus_restored" in stages
     assert "fire_to_paste_dispatch" in stages
+
+
+def test_sensitive_clipboard_change_is_not_captured(isolated_board):
+    gui = _headless_gui(LatencyRecorder())
+    gui.root = SimpleNamespace(after=lambda _delay, _callback: "job")
+    gui._on_clipboard_change(
+        ClipboardChange("hunter2", 123_456, "fake", sensitive=True)
+    )
+
+    gui._poll_ui_actions()
+
+    assert core.get_board() == []
+    sample = gui._latency.recent()[-1]
+    assert sample["name"] == "capture_skipped"
+    assert sample["fields"]["reason"] == "sensitive"
+    assert "hunter2" not in json.dumps(gui._latency.recent())

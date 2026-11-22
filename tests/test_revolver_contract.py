@@ -259,6 +259,10 @@ class TestSelfWriteSuppression:
         def boom(_text):
             raise pyperclip.PyperclipException("no clipboard")
 
+        def unavailable(_text):
+            raise core.native_clipboard.NativeWriteUnavailable("no display")
+
+        monkeypatch.setattr(core.native_clipboard, "write_clipboard_text", unavailable)
         monkeypatch.setattr("pyperclip.copy", boom)
         with pytest.raises(pyperclip.PyperclipException):
             core.set_clipboard_text("never landed")

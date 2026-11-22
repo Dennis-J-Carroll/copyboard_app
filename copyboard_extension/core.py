@@ -9,7 +9,7 @@ import json
 import threading
 import time
 from typing import List, Optional, Dict, Union, Tuple
-from . import paste_helper
+from . import native_clipboard, paste_helper
 from .chambers import (  # chamber_* are re-exported as part of the board API
     DEFAULT_CHAMBERS,
     chamber_index,
@@ -154,7 +154,12 @@ def set_clipboard_text(text: str) -> None:
         _purge_expired_app_writes(now)
         _app_clipboard_writes[text] = now
     try:
-        pyperclip.copy(text)
+        try:
+            native_clipboard.write_clipboard_text(text)
+        except Exception:
+            # Wayland without an X display, an unavailable library, or a
+            # failed native connection: keep the old pyperclip behaviour.
+            pyperclip.copy(text)
     except Exception:
         with _app_clipboard_lock:
             _app_clipboard_writes.pop(text, None)

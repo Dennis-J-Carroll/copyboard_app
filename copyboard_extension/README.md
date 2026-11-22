@@ -95,7 +95,10 @@ The extension is optimized for rapid-fire operations:
 ## Platform-Specific Notes
 
 ### Linux
-- Requires X11 utilities (xclip, xdotool) or Wayland equivalents (wl-clipboard, wtype)
+- Clipboard read/write is native on X11 (`libX11`/`libXfixes`); `xclip` is
+  optional and only used to keep the clipboard after CopyBoard exits
+- `xdotool` is still required for automatic paste; Wayland uses `wl-clipboard`
+  and `wtype`
 - May require `sudo apt-get install python3-dev` for some dependencies
 
 ### macOS

@@ -307,8 +307,12 @@ def paste_combination(items: list) -> bool:
     # Concatenate all items
     combined_content = ''.join(items)
     
-    # Copy to clipboard
-    pyperclip.copy(combined_content)
+    # Copy to clipboard through the shared native/fallback boundary
+    try:
+        from .core import set_clipboard_text
+        set_clipboard_text(combined_content)
+    except Exception:
+        pyperclip.copy(combined_content)
     
     # Paste
     return paste_current_clipboard()

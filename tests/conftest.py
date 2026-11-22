@@ -111,8 +111,17 @@ def mock_clipboard(monkeypatch):
     def _mock_paste():
         return _clipboard_buf["content"]
 
+    def _mock_native_write(text):
+        _clipboard_buf["content"] = text
+
     monkeypatch.setattr("pyperclip.copy", _mock_copy)
     monkeypatch.setattr("pyperclip.paste", _mock_paste)
+    # Keep core's native write path from touching a real X display on CI
+    # while still letting tests observe the value it wrote.
+    monkeypatch.setattr(
+        "copyboard_extension.native_clipboard.write_clipboard_text",
+        _mock_native_write,
+    )
 
     return _clipboard_buf
 

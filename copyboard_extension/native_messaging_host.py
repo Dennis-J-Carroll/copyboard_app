@@ -117,12 +117,10 @@ def handle_message(message: Dict[str, Any]) -> Dict[str, Any]:
         content = message.get('content', '')
         if content:
             try:
-                # We know core.py has copy_to_board() but not add_to_board()
-                # First set the clipboard content
-                import pyperclip
-                pyperclip.copy(content)
-                # Then call copy_to_board() to add current clipboard to board
-                core.copy_to_board()
+                # Put the text on the clipboard through core so native writes
+                # and self-write suppression are shared with the GUI.
+                core.set_clipboard_text(content)
+                core.copy_to_board(content)
                 logger.info(f"Successfully added content to clipboard board")
                 return {'success': True}
             except Exception as e:

@@ -14,7 +14,10 @@ from copyboard_extension.clipboard_watcher import (
     PollingBackend,
     detect_backend_kind,
 )
-from copyboard_extension.native_clipboard import NativeReadUnavailable
+from copyboard_extension.native_clipboard import (
+    ClipboardSnapshot,
+    NativeReadUnavailable,
+)
 
 
 class FakeBackend:
@@ -223,6 +226,21 @@ def test_watcher_keeps_an_explicit_reader():
     assert watcher._read_clipboard is reader
 
 
+def test_polling_uses_the_native_reader_when_available(monkeypatch):
+    native = lambda: "text"
+    native.name = "fake-native"
+    monkeypatch.setattr(
+        "copyboard_extension.clipboard_watcher.create_native_reader",
+        lambda kind: native if kind != "polling" else None,
+    )
+    monkeypatch.setenv("DISPLAY", ":99")
+
+    watcher = ClipboardWatcher(lambda _change: None, backend_kind="polling")
+
+    assert watcher.reader_name == "fake-native"
+    assert watcher._read_clipboard() == "text"
+
+
 def test_watcher_uses_pyperclip_when_there_is_no_native_reader(monkeypatch):
     monkeypatch.setattr(
         "copyboard_extension.clipboard_watcher.create_native_reader",
@@ -250,6 +268,54 @@ def test_native_read_failure_falls_back_to_pyperclip(monkeypatch):
     watcher = ClipboardWatcher(lambda _change: None, backend_kind="x11")
 
     assert watcher._read_clipboard() == "fallback text"
+    assert watcher._read_clipboard.read_snapshot().sensitive is False
+
+
+def test_native_snapshot_survives_the_fallback_wrapper(monkeypatch):
+    class SensitiveNative:
+        def __call__(self):
+            return "password"
+
+        def read_snapshot(self):
+            return ClipboardSnapshot(text="password", sensitive=True)
+
+    monkeypatch.setattr(
+        "copyboard_extension.clipboard_watcher.create_native_reader",
+        lambda _kind: SensitiveNative(),
+    )
+    watcher = ClipboardWatcher(lambda _change: None, backend_kind="x11")
+
+    snapshot = watcher._read_clipboard.read_snapshot()
+
+    assert snapshot.text == "password"
+    assert snapshot.sensitive is True
+
+
+def test_backend_change_carries_sensitive_snapshot():
+    class SensitiveReader:
+        def read_snapshot(self):
+            return ClipboardSnapshot(text="password", sensitive=True)
+
+    changes = []
+    backend = ManualBackend(changes.append, SensitiveReader())
+    backend.fire()
+
+    assert changes[0].text == "password"
+    assert changes[0].sensitive is True
+
+
+def test_polling_backend_carries_sensitive_snapshot():
+    values = iter(
+        [ClipboardSnapshot("baseline"), ClipboardSnapshot("secret", True)]
+    )
+    backend = PollingBackend(lambda _change: None, lambda: next(values))
+
+    assert backend.poll_once() is None
+    change = backend.poll_once()
+
+    assert change is not None
+    assert change.text == "secret"
+    assert change.sensitive is True
 
 
 @pytest.mark.parametrize("kind", ["wayland", "x11", "windows", "macos"])

@@ -32,6 +32,67 @@ class TestCoreRoundTrip:
         assert isolated_board["size"]() == 0
 
 
+class TestClipboardWriteBoundary:
+    """Native writes are preferred, with pyperclip as the safety net."""
+
+    def test_native_write_is_preferred(self, monkeypatch):
+        core._reset_app_clipboard_writes()
+        calls = []
+        monkeypatch.setattr(
+            core.native_clipboard,
+            "write_clipboard_text",
+            lambda text: calls.append(text),
+        )
+        monkeypatch.setattr(
+            core.pyperclip,
+            "copy",
+            lambda _text: pytest.fail("pyperclip should not be used"),
+        )
+
+        core.set_clipboard_text("native text")
+
+        assert calls == ["native text"]
+        assert core.is_app_clipboard_write("native text") is True
+
+    def test_native_failure_falls_back_to_pyperclip(self, monkeypatch):
+        core._reset_app_clipboard_writes()
+        copies = []
+
+        def unavailable(_text):
+            raise core.native_clipboard.NativeWriteUnavailable("no display")
+
+        monkeypatch.setattr(
+            core.native_clipboard, "write_clipboard_text", unavailable
+        )
+        monkeypatch.setattr(
+            core.pyperclip, "copy", lambda text: copies.append(text)
+        )
+
+        core.set_clipboard_text("fallback text")
+
+        assert copies == ["fallback text"]
+        assert core.is_app_clipboard_write("fallback text") is True
+
+    def test_total_failure_forgets_the_self_write(self, monkeypatch):
+        core._reset_app_clipboard_writes()
+
+        def unavailable(_text):
+            raise core.native_clipboard.NativeWriteUnavailable("no display")
+
+        def broken_copy(_text):
+            raise RuntimeError("clipboard is gone")
+
+        monkeypatch.setattr(
+            core.native_clipboard, "write_clipboard_text", unavailable
+        )
+        monkeypatch.setattr(core.pyperclip, "copy", broken_copy)
+
+        with pytest.raises(RuntimeError):
+            core.set_clipboard_text("lost text")
+
+        assert core.is_app_clipboard_write("lost text") is False
+
+
 class TestShutdownPersistence:
     """Shutdown must not rewrite the user's board when nothing changed."""
 

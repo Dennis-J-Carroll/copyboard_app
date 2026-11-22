@@ -1097,9 +1097,12 @@ class CopyboardGUI:
                     error=True,
                 )
         elif isinstance(action, tuple) and action and action[0] == "clipboard":
-            _tag, text, observed_at_ns, backend = action
+            _tag, text, observed_at_ns, backend, *extra = action
             self._observe_clipboard(
-                text, observed_at_ns=observed_at_ns, backend=backend
+                text,
+                observed_at_ns=observed_at_ns,
+                backend=backend,
+                sensitive=bool(extra[0]) if extra else False,
             )
 
     def _copyboard_unfocused(self) -> bool:
@@ -1353,7 +1356,13 @@ class CopyboardGUI:
         if self._closing:
             return
         self._ui_actions.put(
-            ("clipboard", change.text, change.observed_at_ns, change.backend)
+            (
+                "clipboard",
+                change.text,
+                change.observed_at_ns,
+                change.backend,
+                bool(getattr(change, "sensitive", False)),
+            )
         )
 
     def _schedule_target_poll(self) -> None:
@@ -1377,6 +1386,7 @@ class CopyboardGUI:
         current,
         observed_at_ns: Optional[int] = None,
         backend: Optional[str] = None,
+        sensitive: bool = False,
     ) -> bool:
         """Handle one clipboard reading.  Returns True when a round was captured.
 
@@ -1400,11 +1410,19 @@ class CopyboardGUI:
             return False
         if not self.auto_capture_var.get():
             return False
-        core.copy_to_board(current)
-        self.refresh(select_newest=True)
         backend_name = backend or (
             self._watcher.backend_name if self._watcher is not None else "manual"
         )
+        if sensitive:
+            # A password manager (or any app that opted out) owns this copy.
+            # Keep it out of the board and the editor entirely.
+            self._latency.event(
+                "capture_skipped", reason="sensitive", backend=backend_name
+            )
+            self._set_status("Sensitive clipboard content was not captured")
+            return False
+        core.copy_to_board(current)
+        self.refresh(select_newest=True)
         self._latency.record(
             "capture_to_chamber",
             observed_at_ns,

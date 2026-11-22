@@ -202,8 +202,7 @@ def add_to_board(text: str) -> Dict[str, Any]:
         {"ok": True, "position": 0}
     """
     try:
-        import pyperclip
-        pyperclip.copy(text)
+        core.set_clipboard_text(text)
     except Exception:
         pass
     core.copy_to_board(text)

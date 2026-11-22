@@ -12,9 +12,9 @@ Linux desktop releases are available from the
 - **Debian package (`.deb`)** — recommended for Ubuntu, Debian, and Linux Mint.
   Double-click the download to install CopyBoard in the application menu.
 - **AppImage** — portable release for other x86-64 Linux distributions. Make
-  it executable once, then double-click it to run. Capture reads the X11
-  selection directly; copying a chamber and automatic paste still require the
-  host system to provide `xclip` and `xdotool`.
+  it executable once, then double-click it to run. Capture and chamber copies
+  use the X11 selection directly; automatic paste still requires `xdotool`,
+  while `xclip` is only used to keep the clipboard after CopyBoard exits.
 
 The Linux release currently targets X11. Clipboard history and copy-only
 features remain usable under XWayland, but automatic focus restoration and
@@ -22,7 +22,7 @@ pasting depend on `xdotool` and may be limited in native Wayland sessions.
 
 | Platform | Support | Automatic paste |
 | --- | --- | --- |
-| Linux (X11) | Packaged `.deb` / AppImage | `xdotool` + `xclip` (capture reads X11 directly) |
+| Linux (X11) | Packaged `.deb` / AppImage | `xdotool`; clipboard read/write is native (`xclip` only for exit handoff) |
 | Linux (Wayland) | Source only, via XWayland | Limited; native Wayland is not supported |
 | macOS | Source, CI-tested | Requires Accessibility permission for `osascript` |
 | Windows | Source, CI-tested | Needs `pywin32` (see below) |
@@ -54,6 +54,8 @@ you've recently copied, ready to fire back out whenever you need it.
 - Deliberate edit, eject, resize, and clear — nothing is deleted by pasting
 - Combine chambers, file-manager integration, browser extension
 - Local and offline; history lives in a plain JSON file you can read or delete
+- Automatic capture skips copies marked concealed or transient by password
+  managers and other apps
 - Cross-platform source support; Linux is the packaged target, while macOS
   and Windows run from source
 
@@ -79,9 +81,12 @@ first and ejects only the oldest rounds.
 
 The editor auto-captures new text copied anywhere on the desktop (pause it
 with **AUTO-CAPTURE**; the footer always shows whether capture is armed).
-Click a chamber to inspect or edit it, **COPY ONLY** to place it back on the
-clipboard, or **FIRE & HIDE** to hide CopyBoard, return focus to the previous
-app, and paste there.
+Copies that an app marks as concealed or transient — as password managers do —
+are skipped, where the platform exposes that marker, and never reach the editor
+or the history file. Click a chamber to
+inspect or edit it, **COPY ONLY** to place it back on the clipboard, or
+**FIRE & HIDE** to hide CopyBoard, return focus to the previous app, and paste
+there.
 
 ### The quick-paste plate
 
@@ -156,7 +161,7 @@ the platform methodology and delivery sequence.
 #### Linux
 
 ```bash
-# Install dependencies
+# Install dependencies (`xclip` is optional: clipboard handoff on exit)
 sudo apt install xdotool xclip libxfixes3 wl-clipboard python3-tk python3-pip
 
 # Install Copyboard

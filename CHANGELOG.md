@@ -10,7 +10,17 @@
 - In-process clipboard reads on the native event path: X11
   `ConvertSelection` (including INCR transfers), Win32 `GetClipboardData`, and
   `NSPasteboard` on macOS, so a capture no longer starts `xclip`/`xsel`; a
-  failed native read falls back to `pyperclip` for that event
+  failed native read falls back to `pyperclip` for that event, and the 250 ms
+  polling fallback keeps the in-process reader where one exists
+- In-process clipboard writes on the same path: X11 selection ownership with
+  INCR replies, Win32 `SetClipboardData`, and `NSPasteboard`, so firing or
+  copying a round no longer starts `xclip`; `pyperclip` remains the fallback,
+  and the last X11 text is handed back to it on exit so the clipboard survives
+  CopyBoard closing
+- Auto-capture honors platform confidentiality markers — Windows clipboard
+  history exclusion formats, macOS `org.nspasteboard.ConcealedType` /
+  `TransientType`, and KDE's `x-kde-passwordManagerHint` — and skips those
+  copies without storing or previewing them
 - Content-free capture and fire latency traces, with per-stage percentiles and
   a private `~/.config/copyboard/latency.jsonl` log (stage, duration, backend,
   character count — never clipboard text)

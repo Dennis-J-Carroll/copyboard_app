@@ -302,10 +302,10 @@ class SnippetManager:
         key = f"{ci}:{si}"
         self._frecency[key] = self._frecency.get(key, 0) + 1
 
-        # Copy to clipboard
+        # Copy to clipboard through the shared native/fallback boundary
         try:
-            import pyperclip
-            pyperclip.copy(text)
+            from .core import set_clipboard_text
+            set_clipboard_text(text)
         except Exception:
             pass
 

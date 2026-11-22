@@ -191,10 +191,8 @@ def handle_copy_all() -> int:
 
 def handle_add(text: str) -> int:
     """Handle the add command"""
-    # Set clipboard content and add to board
-    import pyperclip
-    pyperclip.copy(text)
-    core.copy_to_board()
+    core.set_clipboard_text(text)
+    core.copy_to_board(text)
     print(f"Added text to clipboard board at index 0.")
     return 0
 
