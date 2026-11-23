@@ -381,6 +381,24 @@ def clear_board() -> List[str]:
     
     return _board
 
+def replace_board(items: List[str]) -> List[str]:
+    """Replace the whole cylinder with ``items`` in chamber order.
+
+    ``items[0]`` becomes chamber 01.  This is deliberately destructive: it is
+    the bulk-load primitive behind explicit workflows such as scene
+    disassembly, where the caller has already previewed and confirmed the
+    replacement.  Anything beyond the current chamber count is dropped; a
+    caller that must not lose text should check the length first (the
+    disassembly planner does).  The new board is written to disk immediately.
+
+    Returns a copy of the applied board.
+    """
+    global _board
+    _board = list(items)[:MAX_BOARD_SIZE]
+    _mark_modified()
+    _save_board(force=True)
+    return _board.copy()
+
 def get_board() -> List[str]:
     """
     Get the current clipboard board.

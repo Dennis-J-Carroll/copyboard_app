@@ -3,11 +3,13 @@ Copyboard CLI - Command-line interface for the multi-clipboard utility
 """
 import argparse
 import json as json_mod
+import pyperclip
 import sys
 import textwrap
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from . import core
+from .chambers import chamber_label
 
 
 def create_parser() -> argparse.ArgumentParser:
@@ -33,6 +35,10 @@ def create_parser() -> argparse.ArgumentParser:
               copyboard snippet add 0 "label" "code"   # Add snippet to chamber 0
               copyboard snippet export out.copyboard   # Export snippet pack
               copyboard snippet import pack.copyboard  # Import snippet pack
+
+            Scene disassembly:
+              copyboard disassemble scene.txt --dry-run   # Preview @TAG: buckets
+              copyboard disassemble scene.txt --replace   # Load them into chambers
 
             Agent Integration:
               copyboard profile                  # Show coding fingerprint
@@ -74,6 +80,36 @@ def create_parser() -> argparse.ArgumentParser:
     paste_combo_parser = subparsers.add_parser('paste-combo', help='Paste a combination of clipboard items')
     paste_combo_parser.add_argument('indices', type=int, nargs='+', 
                                help='Indices of items to combine and paste')
+
+    # Disassemble command (one tagged text into one chamber per tag)
+    disassemble_parser = subparsers.add_parser(
+        'disassemble',
+        help='Split a tagged text into per-tag chambers',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent('''\
+            Tag syntax:
+              @ALICE: You're late.
+              @BOB: The road was long.
+
+              @ALICE:
+              It always is.
+
+            Everything from a cue to the next cue belongs to that tag.
+            Chambers are assigned in first-appearance order.
+        '''),
+    )
+    disassemble_parser.add_argument(
+        'source', type=str, nargs='?', default=None,
+        help='File containing @TAG: cues ("-" reads stdin; omit for clipboard)',
+    )
+    disassemble_parser.add_argument(
+        '--replace', action='store_true',
+        help='Replace the current cylinder contents (required when not empty)',
+    )
+    disassemble_parser.add_argument(
+        '--dry-run', action='store_true',
+        help='Show the tag-to-chamber layout without loading anything',
+    )
     
     # Monitor command (for capturing clipboard changes)
     monitor_parser = subparsers.add_parser('monitor', help='Monitor clipboard for changes')
@@ -272,6 +308,98 @@ def handle_monitor(seconds: int) -> int:
         return 0
 
 
+def _read_disassembly_source(source: Optional[str]) -> Tuple[str, str]:
+    """Read a file, stdin, or the clipboard; return (text, display label)."""
+    if source == '-':
+        return sys.stdin.read(), 'stdin'
+    if source is None:
+        return pyperclip.paste(), 'clipboard'
+    with open(source, 'r', encoding='utf-8') as handle:
+        return handle.read(), source
+
+
+def _print_disassembly_plan(plan, label: str, dry_run: bool) -> None:
+    """Print a compact tag-to-chamber table for humans."""
+    print(
+        f"Disassembled {len(plan.voices)} tag(s) from {plan.total_lines} "
+        f"line(s) of {label}."
+    )
+    if plan.preamble_lines:
+        print(
+            f"Ignored {plan.preamble_lines} line(s) before the first "
+            "@TAG: cue."
+        )
+    print("")
+    for index, voice in enumerate(plan.voices):
+        tag = voice.tag if len(voice.tag) <= 16 else voice.tag[:15] + "…"
+        print(
+            f"  {chamber_label(index)}  {tag:<16}  "
+            f"{voice.cues:>3} cue(s)  {voice.characters:>7} chars  "
+            f"{voice.preview}"
+        )
+    print("")
+    if dry_run:
+        print("Dry run: nothing was loaded; the cylinder is unchanged.")
+        return
+
+    first = chamber_label(0)
+    last = chamber_label(len(plan.voices) - 1)
+    span = first if first == last else f"{first}-{last}"
+    print(
+        f"Loaded {len(plan.voices)} transcript(s) into chamber(s) {span}. "
+        "Fire each chamber into its destination."
+    )
+
+
+def handle_disassemble(args) -> int:
+    """Handle the disassemble command."""
+    from . import disassembly
+
+    source = getattr(args, 'source', None)
+    if source == '-':
+        source_label = 'stdin'
+    elif source is None:
+        source_label = 'the clipboard'
+    else:
+        source_label = source
+
+    try:
+        text, label = _read_disassembly_source(source)
+    except Exception as exc:
+        print(f"Error: could not read {source_label}: {exc}")
+        return 1
+
+    if not text or not text.strip():
+        print("Error: no text to disassemble.")
+        return 1
+
+    try:
+        plan = disassembly.plan_disassembly(text, core.get_chamber_count())
+    except disassembly.DisassemblyError as exc:
+        print(f"Error: {exc}")
+        return 1
+
+    dry_run = bool(getattr(args, 'dry_run', False))
+    if not dry_run:
+        if not getattr(args, 'replace', False) and core.get_board_size() > 0:
+            print(
+                f"Error: the cylinder already holds {core.get_board_size()} "
+                "round(s). Re-run with --replace to discard them, or use "
+                "--dry-run to preview."
+            )
+            return 1
+        core.replace_board([voice.text for voice in plan.voices])
+
+    if getattr(args, 'json_output', False):
+        payload = disassembly.plan_to_dict(plan)
+        payload["source"] = label
+        payload["applied"] = not dry_run
+        print(json_mod.dumps(payload, indent=2, ensure_ascii=False))
+    else:
+        _print_disassembly_plan(plan, label, dry_run)
+    return 0
+
+
 def main(args: Optional[List[str]] = None) -> int:
     """Main entry point for the CLI"""
     parser = create_parser()
@@ -296,6 +424,8 @@ def main(args: Optional[List[str]] = None) -> int:
         return handle_clear()
     elif parsed_args.command == 'paste-combo':
         return handle_paste_combo(parsed_args.indices)
+    elif parsed_args.command == 'disassemble':
+        return handle_disassemble(parsed_args)
     elif parsed_args.command == 'monitor':
         return handle_monitor(parsed_args.seconds)
     elif parsed_args.command == 'snippet':

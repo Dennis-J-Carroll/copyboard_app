@@ -59,6 +59,10 @@
   helpers and contract tests can run in headless environments
 - Chamber numbering helpers (`copyboard_extension.chambers`) as the single
   conversion point between board indexes and the `01`–`16` labels
+- Tag-driven scene disassembly: `copyboard disassemble` splits one
+  `@TAG:`-tagged text into a transcript per tag and loads them into chambers
+  01…N in first-appearance order, with `--dry-run` and an explicit `--replace`
+  guard before replacing existing rounds
 
 ### Fixed
 - The native messaging host starts when Chrome executes it directly, as the

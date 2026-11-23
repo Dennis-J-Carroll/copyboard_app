@@ -53,6 +53,8 @@ you've recently copied, ready to fire back out whenever you need it.
 - Direct global shortcuts for every chamber, all editable, with conflict status
 - Deliberate edit, eject, resize, and clear — nothing is deleted by pasting
 - Combine chambers, file-manager integration, browser extension
+- Split one `@TAG:`-tagged text into a chamber per speaker, ready to fire
+  into each character's own transcript
 - Local and offline; history lives in a plain JSON file you can read or delete
 - Automatic capture skips copies marked concealed or transient by password
   managers and other apps
@@ -238,6 +240,22 @@ copyboard clear
 # Paste a combination of items
 copyboard paste-combo 0 2 3
 ```
+
+#### Disassemble a tagged scene
+
+Mark each speaker with an `@TAG:` cue, preview the layout, then load one
+chamber per tag:
+
+```bash
+copyboard disassemble scene.txt --dry-run
+copyboard disassemble scene.txt --replace
+```
+
+Everything from a cue to the next one belongs to that tag; tags are stripped
+from the transcripts and chambers are assigned in first-appearance order. The
+command refuses to discard a loaded cylinder without `--replace`. See
+[`docs/DISASSEMBLY.md`](docs/DISASSEMBLY.md) for syntax, safety rules and the
+docketed GUI follow-ups.
 
 ### Global Hotkeys
 
